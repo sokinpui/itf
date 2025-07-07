@@ -43,14 +43,58 @@ def main():
         print("No valid file blocks found to process.")
         sys.exit(0)
 
+    directories_to_create = set()
+    for file_path, _ in file_blocks:
+        abs_file_path = os.path.abspath(file_path)
+        target_dir = os.path.dirname(abs_file_path)
+
+        # Only add to set if it's a non-empty directory path and doesn't exist
+        if target_dir and not os.path.exists(target_dir):
+            directories_to_create.add(target_dir)
+
+    if directories_to_create:
+        print("\nThe following directories need to be created:")
+        for d in sorted(list(directories_to_create)):
+            print(f"  - {d}")
+
+        try:
+            response = (
+                input(f"Do you want to create all these directories? (y/N): ")
+                .strip()
+                .lower()
+            )
+            if response != "y":
+                print("Directory creation declined. Exiting.", file=sys.stderr)
+                sys.exit(0)
+        except EOFError:
+            # This handles cases where input is not from a TTY (e.g., piped input)
+            print("No input provided for directory creation. Exiting.", file=sys.stderr)
+            sys.exit(0)
+
+        print("\nCreating directories...")
+        for d in sorted(list(directories_to_create)):
+            try:
+                os.makedirs(
+                    d, exist_ok=True
+                )  # exist_ok=True to prevent error if already exists (e.g. race condition or manual creation)
+                print(f"  -> Created: {d}")
+            except OSError as e:
+                print(f"  -> Error creating directory '{d}': {e}", file=sys.stderr)
+                print("Aborting due to directory creation failure.", file=sys.stderr)
+                sys.exit(1)
+    else:
+        print("\nNo new directories need to be created.")
+
     try:
         with NeovimManager() as manager:
+            updated_count = 0
             for file_path, content_lines in file_blocks:
                 print(f"Processing: {file_path}")
                 manager.update_buffer(file_path, content_lines)
+                updated_count += 1
 
             print(f"\n--- Buffer update complete ---")
-            print(f"Successfully processed {len(file_blocks)} block(s) in Neovim.")
+            print(f"Successfully processed {updated_count} block(s) in Neovim.")
 
             if args.save:
                 manager.save_all_buffers()
