@@ -2,6 +2,8 @@
 import argparse
 import os
 import sys
+import shutil
+import subprocess
 
 from .editor import NeovimManager
 from .parser import parse_file_blocks
@@ -14,33 +16,77 @@ from .printer import (
 SOURCE_FILE_NAME = "itf.txt"
 
 
+def get_clipboard_content() -> str:
+    """
+    Retrieves content from the system clipboard using platform-specific tools.
+    """
+    platform = sys.platform
+    command = []
+
+    if platform == "darwin":  # macOS
+        command = ["pbpaste"]
+    elif platform == "linux":
+        if shutil.which("wl-paste"):
+            command = ["wl-paste", "--no-newline"]
+        elif shutil.which("xclip"):
+            command = ["xclip", "-selection", "clipboard", "-o"]
+        else:
+            print_error("Clipboard utility not found. Please install 'wl-clipboard' or 'xclip'.")
+            sys.exit(1)
+    elif platform == "win32":  # Windows
+        command = ["powershell", "-command", "Get-Clipboard"]
+    else:
+        print_error(f"Unsupported platform for clipboard access: {platform}")
+        sys.exit(1)
+
+    try:
+        content = subprocess.check_output(command, text=True, stderr=subprocess.PIPE)
+        if not content.strip():
+            print_warning("Clipboard is empty. Nothing to process.")
+            sys.exit(0)
+        return content
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print_error(f"Failed to get clipboard content using '{' '.join(command)}': {e}")
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the 'itf' command-line tool."""
     parser = argparse.ArgumentParser(
-        description=f"Parse '{SOURCE_FILE_NAME}' in the current directory and update Neovim buffers."
+        description=f"Parse '{SOURCE_FILE_NAME}' or clipboard content and update Neovim buffers."
     )
     parser.add_argument(
         "--save",
         action="store_true",
         help="Save all modified buffers in Neovim after the update.",
     )
+    parser.add_argument(
+        "-c", "--clipboard",
+        action="store_true",
+        help="Parse content directly from the system clipboard instead of itf.txt."
+    )
     args = parser.parse_args()
 
-    source_path = os.path.join(os.getcwd(), SOURCE_FILE_NAME)
+    content = ""
+    if args.clipboard:
+        print_header("--- Parsing content from system clipboard ---")
+        content = get_clipboard_content()
+    else:
+        source_path = os.path.join(os.getcwd(), SOURCE_FILE_NAME)
+        if not os.path.exists(source_path):
+            print_error(
+                f"Error: Source file '{SOURCE_FILE_NAME}' not found. "
+                f"(Use -c or --clipboard to read from clipboard)."
+            )
+            sys.exit(1)
 
-    if not os.path.exists(source_path):
-        print_error(
-            f"Error: Source file '{SOURCE_FILE_NAME}' not found in the current directory."
-        )
-        sys.exit(1)
-
-    print_header(f"--- Starting Neovim buffer update from '{source_path}' ---")
-    try:
-        with open(source_path, "r", encoding="utf-8") as f:
-            content = f.read()
-    except IOError as e:
-        print_error(f"Error reading source file: {e}")
-        sys.exit(1)
+        print_header(f"--- Starting Neovim buffer update from '{source_path}' ---")
+        try:
+            with open(source_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except IOError as e:
+            print_error(f"Error reading source file: {e}")
+            sys.exit(1)
 
     file_blocks = list(parse_file_blocks(content))
     if not file_blocks:
@@ -82,7 +128,7 @@ def main():
     else:
         print_info("\nNo new directories need to be created.")
 
-    # --- NEW: Collect results silently and print summary at the end ---
+    # Collect results silently and print summary at the end
     updated_files = []
     failed_files = []
     try:
