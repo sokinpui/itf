@@ -129,6 +129,11 @@ class NeovimManager:
 
             self.nvim = pynvim.attach("socket", path=self._socket_path)
             self._is_self_started = True
+
+            # --- NEW: Disable swap files to prevent E325 errors ---
+            self.nvim.command("set noswapfile")
+            # --- END NEW ---
+
             print(
                 f"-> Started temporary instance with socket '{self._socket_path}'",
                 file=sys.stderr,
