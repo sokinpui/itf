@@ -1,0 +1,16 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "itf"
+version = "1.0.0"
+description = "A tool to parse an itf.txt file and update corresponding Neovim buffers."
+requires-python = ">=3.8"
+dependencies = [
+    "pynvim>=0.5.0",
+]
+
+[project.scripts]
+itf = "itf.__main__:main"
