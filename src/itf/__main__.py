@@ -6,15 +6,10 @@ import sys
 from .editor import NeovimManager
 from .parser import parse_file_blocks
 from .printer import (
-    ProgressBar,
-    print_error,
-    print_header,
-    print_info,
-    print_path,
-    print_success,
-    print_warning,
-    prompt_user,
+    print_header, print_info, print_success, print_error,
+    print_warning, prompt_user, print_path, ProgressBar
 )
+
 
 SOURCE_FILE_NAME = "itf.txt"
 
@@ -67,10 +62,8 @@ def main():
             print_path(f"- {d}")
 
         try:
-            response = prompt_user(
-                "Do you want to create all these directories? (y/N):"
-            ).lower()
-            if response != "y":
+            response = prompt_user("Do you want to create all these directories? (y/N):").lower()
+            if response != 'y':
                 print_warning("Directory creation declined. Exiting.")
                 sys.exit(0)
         except (EOFError, KeyboardInterrupt):
@@ -89,20 +82,39 @@ def main():
     else:
         print_info("\nNo new directories need to be created.")
 
+    # --- NEW: Collect results silently and print summary at the end ---
+    updated_files = []
+    failed_files = []
     try:
         with NeovimManager() as manager:
             progress_bar = ProgressBar(total=len(file_blocks))
+            progress_bar.update(0) # Initialize the bar display
 
             for file_path, content_lines in file_blocks:
-                print_info(f"\nProcessing: {file_path}")
-                manager.update_buffer(file_path, content_lines)
+                success = manager.update_buffer(file_path, content_lines)
+                if success:
+                    updated_files.append(file_path)
+                else:
+                    failed_files.append(file_path)
                 progress_bar.update()
 
             progress_bar.finish()
-            print_header(f"\n--- Buffer update complete ---")
-            print_success(
-                f"Successfully processed {len(file_blocks)} block(s) in Neovim."
-            )
+
+            # Print the final summary report
+            print_header("\n--- Update Summary ---", file=sys.stdout)
+            if updated_files:
+                print_success(f"Successfully updated {len(updated_files)} file(s):", file=sys.stdout)
+                for f in updated_files:
+                    print(f"  - {f}", file=sys.stdout)
+
+            if failed_files:
+                print_error(f"Failed to process {len(failed_files)} file(s):", file=sys.stdout)
+                for f in failed_files:
+                    print(f"  - {f}", file=sys.stdout)
+
+            if not updated_files and not failed_files:
+                print_warning("No files were processed.", file=sys.stdout)
+
 
             if args.save:
                 manager.save_all_buffers()

@@ -104,29 +104,34 @@ class NeovimManager:
             print_info("Hint: Is 'nvim' in your system's PATH and executable?")
             sys.exit(1)
 
-    def update_buffer(self, file_path: str, content_lines: list[str]) -> None:
+    def update_buffer(self, file_path: str, content_lines: list[str]) -> bool:
+        """
+        Updates a buffer silently and returns a status.
+        Returns: True on success, False on failure.
+        """
         if not self.nvim:
             raise ConnectionError("Not connected to any Neovim instance.")
 
         abs_file_path = os.path.abspath(file_path)
 
-        target_buf = None
-        for buf in self.nvim.api.list_bufs():
-            if self.nvim.api.buf_get_name(buf) == abs_file_path:
-                target_buf = buf
-                break
-
-        if not target_buf:
-            print_info(f"  -> File not open. Creating new buffer for '{file_path}'...")
-            escaped_path = self.nvim.api.call_function("fnameescape", [abs_file_path])
-            self.nvim.command(f"edit {escaped_path}")
-            target_buf = self.nvim.api.get_current_buf()
-
         try:
+            target_buf = None
+            for buf in self.nvim.api.list_bufs():
+                if self.nvim.api.buf_get_name(buf) == abs_file_path:
+                    target_buf = buf
+                    break
+
+            if not target_buf:
+                escaped_path = self.nvim.api.call_function("fnameescape", [abs_file_path])
+                self.nvim.command(f"edit {escaped_path}")
+                target_buf = self.nvim.api.get_current_buf()
+
             self.nvim.api.buf_set_lines(target_buf, 0, -1, True, content_lines)
-            print_success(f"  -> Successfully updated buffer {target_buf.handle}.")
+            return True
         except pynvim.NvimError as e:
-            print_error(f"  -> Neovim API Error updating buffer: {e}")
+            # Log the specific error to stderr for immediate visibility if needed
+            print_error(f"\nError processing '{file_path}': {e}")
+            return False
 
     def save_all_buffers(self) -> None:
         if not self.nvim:
