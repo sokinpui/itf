@@ -3,6 +3,7 @@ src/itf/__init__.py
 src/itf/__main__.py
 src/itf/editor.py
 src/itf/parser.py
+src/itf/printer.py
 src/itf.egg-info/PKG-INFO
 src/itf.egg-info/SOURCES.txt
 src/itf.egg-info/dependency_links.txt

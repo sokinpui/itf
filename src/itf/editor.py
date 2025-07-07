@@ -1,14 +1,15 @@
-# src/itf/editor.py
+# ./src/itf/editor.py
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import shutil
 from types import TracebackType
 from typing import Optional, Type
 
 import pynvim
+from .printer import print_info, print_success, print_warning, print_error
 
 
 class NeovimManager:
@@ -24,12 +25,9 @@ class NeovimManager:
         self._socket_path: Optional[str] = None
         self._temp_dir: Optional[str] = None
         self._is_self_started: bool = False
-        self._nvim_process: Optional[subprocess.Popen] = (
-            None  # Store the Popen object for direct control
-        )
+        self._nvim_process: Optional[subprocess.Popen] = None
 
     def __enter__(self) -> "NeovimManager":
-        """Finds or starts a Neovim instance and establishes a connection."""
         self._connect()
         return self
 
@@ -39,39 +37,28 @@ class NeovimManager:
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        """Cleans up the Neovim instance if it was started by this manager."""
         if self._is_self_started and self._nvim_process:
-            print("-> Closing temporary Neovim instance...", file=sys.stderr)
+            print_info("-> Closing temporary Neovim instance...")
             try:
-                # Attempt to close the pynvim connection cleanly first
                 if self.nvim:
                     self.nvim.close()
             except Exception as e:
-                print(f"Warning: Error closing pynvim connection: {e}", file=sys.stderr)
+                print_warning(f"Warning: Error closing pynvim connection: {e}")
 
-            # Terminate the actual Neovim process using its Popen object
             self._nvim_process.terminate()
             try:
-                self._nvim_process.wait(
-                    timeout=1
-                )  # Give it 1 second to terminate gracefully
-                print("-> Temporary Neovim instance terminated.")
+                self._nvim_process.wait(timeout=1)
+                print_success("-> Temporary Neovim instance terminated.")
             except subprocess.TimeoutExpired:
-                print(
-                    "-> Warning: Neovim process did not terminate gracefully. Killing...",
-                    file=sys.stderr,
-                )
-                self._nvim_process.kill()  # Force kill if it doesn't terminate
-                self._nvim_process.wait()  # Wait for it to be killed after forceful termination
+                print_warning("-> Warning: Neovim process did not terminate gracefully. Killing...")
+                self._nvim_process.kill()
+                self._nvim_process.wait()
 
-        # Clean up the temporary directory if it was created
         if self._temp_dir:
             shutil.rmtree(self._temp_dir, ignore_errors=True)
 
     def _connect(self) -> None:
-        """Connects to an existing Nvim instance or starts a new one."""
         try:
-            # First, try to find an existing Neovim instance by listing servers
             serverlist_raw = subprocess.check_output(
                 ["nvim", "--serverlist"], text=True, stderr=subprocess.PIPE
             )
@@ -79,115 +66,75 @@ class NeovimManager:
             for server_path in filter(None, servers):
                 try:
                     self.nvim = pynvim.attach("socket", path=server_path)
-                    # Test connection to ensure it's live (e.g., get mode)
                     self.nvim.api.get_mode()
-                    print(
-                        f"-> Connected to running Neovim instance at '{server_path}'",
-                        file=sys.stderr,
-                    )
+                    print_info(f"-> Connected to running Neovim instance at '{server_path}'")
                     return
-                except (
-                    pynvim.NvimError,
-                    FileNotFoundError,
-                    ConnectionRefusedError,
-                    BrokenPipeError,
-                ):
-                    # If connection fails (e.g., stale socket or instance died), try next or start new
+                except (pynvim.NvimError, FileNotFoundError, ConnectionRefusedError, BrokenPipeError):
                     continue
         except (subprocess.CalledProcessError, FileNotFoundError):
-            # 'nvim --serverlist' command failed (e.g., nvim not in PATH) or no servers found
             pass
 
-        # If no running instance was found, start a new temporary one
-        print(
-            "-> No running Neovim instance found. Starting a temporary one...",
-            file=sys.stderr,
-        )
+        print_info("-> No running Neovim instance found. Starting a temporary one...")
         self._temp_dir = tempfile.mkdtemp(prefix="itf-nvim-")
         self._socket_path = os.path.join(self._temp_dir, "nvim.sock")
 
         try:
-            # Start Neovim in headless mode, with a clean config (no plugins/init.vim/init.lua)
-            # and detach it from the current process group using preexec_fn=os.setsid.
             self._nvim_process = subprocess.Popen(
                 ["nvim", "--headless", "--clean", "--listen", self._socket_path],
-                stdout=subprocess.DEVNULL,  # Suppress stdout
-                stderr=subprocess.DEVNULL,  # Suppress stderr
-                preexec_fn=os.setsid,  # Detach from parent process group
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
             )
 
-            # Poll for the socket file to appear, giving Neovim time to start up
             max_attempts = 10
             for i in range(max_attempts):
                 if os.path.exists(self._socket_path):
                     break
                 time.sleep(0.1)
             else:
-                raise RuntimeError(
-                    f"Neovim socket '{self._socket_path}' did not appear after {max_attempts*0.1} seconds."
-                )
+                raise RuntimeError(f"Neovim socket '{self._socket_path}' did not appear.")
 
             self.nvim = pynvim.attach("socket", path=self._socket_path)
             self._is_self_started = True
-
-            # Disable swap files to prevent E325 errors
             self.nvim.command("set noswapfile")
-
-            print(
-                f"-> Started temporary instance with socket '{self._socket_path}'",
-                file=sys.stderr,
-            )
+            print_success(f"-> Started temporary instance with socket '{self._socket_path}'")
         except (FileNotFoundError, pynvim.NvimError, RuntimeError) as e:
-            print(
-                "Fatal: Could not start or connect to a Neovim instance.",
-                file=sys.stderr,
-            )
-            print(f"Error: {e}", file=sys.stderr)
-            print(
-                "Hint: Is 'nvim' in your system's PATH and executable?", file=sys.stderr
-            )
+            print_error("Fatal: Could not start or connect to a Neovim instance.")
+            print_error(f"Error: {e}")
+            print_info("Hint: Is 'nvim' in your system's PATH and executable?")
             sys.exit(1)
 
     def update_buffer(self, file_path: str, content_lines: list[str]) -> None:
-        """
-        Updates or creates a buffer with the given content.
-        Assumes the target directory for file_path already exists.
-        """
         if not self.nvim:
             raise ConnectionError("Not connected to any Neovim instance.")
 
         abs_file_path = os.path.abspath(file_path)
-        # Directory check and creation logic removed as it's handled in __main__.py
 
-        # Check if buffer for this file already exists
         target_buf = None
         for buf in self.nvim.api.list_bufs():
             if self.nvim.api.buf_get_name(buf) == abs_file_path:
                 target_buf = buf
                 break
 
-        # If no buffer exists, create one by opening the file
         if not target_buf:
-            print(f"  -> File not open. Creating new buffer for '{file_path}'...")
+            print_info(f"  -> File not open. Creating new buffer for '{file_path}'...")
             escaped_path = self.nvim.api.call_function("fnameescape", [abs_file_path])
             self.nvim.command(f"edit {escaped_path}")
             target_buf = self.nvim.api.get_current_buf()
 
         try:
             self.nvim.api.buf_set_lines(target_buf, 0, -1, True, content_lines)
-            print(f"  -> Successfully updated buffer {target_buf.handle}.")
+            print_success(f"  -> Successfully updated buffer {target_buf.handle}.")
         except pynvim.NvimError as e:
-            print(f"  -> Neovim API Error updating buffer: {e}", file=sys.stderr)
+            print_error(f"  -> Neovim API Error updating buffer: {e}")
 
     def save_all_buffers(self) -> None:
-        """Saves all modified buffers without triggering autocommands."""
         if not self.nvim:
             raise ConnectionError("Not connected to any Neovim instance.")
 
-        print("\nSaving all modified buffers (without running autocommands)...")
+        print_info("\nSaving all modified buffers (without running autocommands)...")
         try:
-            # Use 'noa wa!' to write all modified buffers without autocommands
             self.nvim.command("noa wa!")
-            print("Save complete.")
+            print_success("Save complete.")
         except pynvim.NvimError as e:
-            print(f"  -> Neovim API Error saving buffers: {e}", file=sys.stderr)
+            print_error(f"  -> Neovim API Error saving buffers: {e}")

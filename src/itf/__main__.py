@@ -1,10 +1,20 @@
-# src/itf/__main__.py
+# ./src/itf/__main__.py
 import argparse
 import os
 import sys
 
 from .editor import NeovimManager
 from .parser import parse_file_blocks
+from .printer import (
+    ProgressBar,
+    print_error,
+    print_header,
+    print_info,
+    print_path,
+    print_success,
+    print_warning,
+    prompt_user,
+)
 
 SOURCE_FILE_NAME = "itf.txt"
 
@@ -24,83 +34,81 @@ def main():
     source_path = os.path.join(os.getcwd(), SOURCE_FILE_NAME)
 
     if not os.path.exists(source_path):
-        print(
-            f"Error: Source file '{SOURCE_FILE_NAME}' not found in the current directory.",
-            file=sys.stderr,
+        print_error(
+            f"Error: Source file '{SOURCE_FILE_NAME}' not found in the current directory."
         )
         sys.exit(1)
 
-    print(f"--- Starting Neovim buffer update from '{source_path}' ---")
+    print_header(f"--- Starting Neovim buffer update from '{source_path}' ---")
     try:
         with open(source_path, "r", encoding="utf-8") as f:
             content = f.read()
     except IOError as e:
-        print(f"Error reading source file: {e}", file=sys.stderr)
+        print_error(f"Error reading source file: {e}")
         sys.exit(1)
 
     file_blocks = list(parse_file_blocks(content))
     if not file_blocks:
-        print("No valid file blocks found to process.")
+        print_warning("No valid file blocks found to process.")
         sys.exit(0)
 
+    # Pre-scan and confirm directory creation
     directories_to_create = set()
     for file_path, _ in file_blocks:
         abs_file_path = os.path.abspath(file_path)
         target_dir = os.path.dirname(abs_file_path)
 
-        # Only add to set if it's a non-empty directory path and doesn't exist
         if target_dir and not os.path.exists(target_dir):
             directories_to_create.add(target_dir)
 
     if directories_to_create:
-        print("\nThe following directories need to be created:")
+        print_info("\nThe following directories need to be created:")
         for d in sorted(list(directories_to_create)):
-            print(f"  - {d}")
+            print_path(f"- {d}")
 
         try:
-            response = (
-                input(f"Do you want to create all these directories? (y/N): ")
-                .strip()
-                .lower()
-            )
+            response = prompt_user(
+                "Do you want to create all these directories? (y/N):"
+            ).lower()
             if response != "y":
-                print("Directory creation declined. Exiting.", file=sys.stderr)
+                print_warning("Directory creation declined. Exiting.")
                 sys.exit(0)
-        except EOFError:
-            # This handles cases where input is not from a TTY (e.g., piped input)
-            print("No input provided for directory creation. Exiting.", file=sys.stderr)
+        except (EOFError, KeyboardInterrupt):
+            print_warning("\nOperation cancelled by user. Exiting.")
             sys.exit(0)
 
-        print("\nCreating directories...")
+        print_info("\nCreating directories...")
         for d in sorted(list(directories_to_create)):
             try:
-                os.makedirs(
-                    d, exist_ok=True
-                )  # exist_ok=True to prevent error if already exists (e.g. race condition or manual creation)
-                print(f"  -> Created: {d}")
+                os.makedirs(d, exist_ok=True)
+                print_success(f"  -> Created: {d}")
             except OSError as e:
-                print(f"  -> Error creating directory '{d}': {e}", file=sys.stderr)
-                print("Aborting due to directory creation failure.", file=sys.stderr)
+                print_error(f"  -> Error creating directory '{d}': {e}")
+                print_error("Aborting due to directory creation failure.")
                 sys.exit(1)
     else:
-        print("\nNo new directories need to be created.")
+        print_info("\nNo new directories need to be created.")
 
     try:
         with NeovimManager() as manager:
-            updated_count = 0
-            for file_path, content_lines in file_blocks:
-                print(f"Processing: {file_path}")
-                manager.update_buffer(file_path, content_lines)
-                updated_count += 1
+            progress_bar = ProgressBar(total=len(file_blocks))
 
-            print(f"\n--- Buffer update complete ---")
-            print(f"Successfully processed {updated_count} block(s) in Neovim.")
+            for file_path, content_lines in file_blocks:
+                print_info(f"\nProcessing: {file_path}")
+                manager.update_buffer(file_path, content_lines)
+                progress_bar.update()
+
+            progress_bar.finish()
+            print_header(f"\n--- Buffer update complete ---")
+            print_success(
+                f"Successfully processed {len(file_blocks)} block(s) in Neovim."
+            )
 
             if args.save:
                 manager.save_all_buffers()
 
     except Exception as e:
-        print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
+        print_error(f"\nAn unexpected error occurred: {e}")
         sys.exit(1)
 
 
