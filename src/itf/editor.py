@@ -150,6 +150,42 @@ class NeovimManager:
             raise ConnectionError("Not connected to any Neovim instance.")
 
         abs_file_path = os.path.abspath(file_path)
+        target_dir = os.path.dirname(abs_file_path)
+
+        # Check if the target directory exists. If not, prompt user to create it.
+        # An empty target_dir implies the file is in the current working directory,
+        # which is assumed to exist.
+        if target_dir and not os.path.exists(target_dir):
+            print(f"  -> Directory '{target_dir}' does not exist.", file=sys.stderr)
+            try:
+                response = (
+                    input(f"  -> Do you want to create it? (y/N): ").strip().lower()
+                )
+                if response != "y":
+                    print(
+                        f"  -> Skipping '{file_path}' (directory creation declined).",
+                        file=sys.stderr,
+                    )
+                    return
+                os.makedirs(
+                    target_dir, exist_ok=True
+                )  # exist_ok=True prevents error if dir created concurrently
+                print(f"  -> Directory '{target_dir}' created successfully.")
+            except OSError as e:
+                print(
+                    f"  -> Error creating directory '{target_dir}': {e}",
+                    file=sys.stderr,
+                )
+                print(f"  -> Skipping '{file_path}'.", file=sys.stderr)
+                return
+            except (
+                EOFError
+            ):  # Handles case where input stream is closed (e.g., piped input)
+                print(
+                    f"  -> No input provided for directory creation. Skipping '{file_path}'.",
+                    file=sys.stderr,
+                )
+                return
 
         # Check if buffer for this file already exists
         target_buf = None
