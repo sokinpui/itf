@@ -1,2 +1,0 @@
-[console_scripts]
-itf = itf.__main__:main
