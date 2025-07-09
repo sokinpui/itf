@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+src/itf/__init__.py
+src/itf/__main__.py
+src/itf/editor.py
+src/itf/parser.py
+src/itf/patcher.py
+src/itf/printer.py
+src/itf.egg-info/PKG-INFO
+src/itf.egg-info/SOURCES.txt
+src/itf.egg-info/dependency_links.txt
+src/itf.egg-info/entry_points.txt
+src/itf.egg-info/requires.txt
+src/itf.egg-info/top_level.txt

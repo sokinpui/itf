@@ -97,7 +97,7 @@ class NeovimManager:
             # Create the undo directory if it doesn't exist to ensure undofile works.
 
             self._nvim_process = subprocess.Popen(
-                ["nvim", "--headless", "--listen", self._socket_path],
+                ["nvim", "--headless", "--clean", "--listen", self._socket_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 preexec_fn=os.setsid,
