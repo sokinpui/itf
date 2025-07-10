@@ -146,7 +146,8 @@ class NeovimManager:
         try:
             target_buf = None
             for buf in self.nvim.api.list_bufs():
-                if self.nvim.api.buf_get_name(buf) == abs_file_path:
+                buf_name = self.nvim.api.buf_get_name(buf)
+                if buf_name and os.path.abspath(buf_name) == abs_file_path:
                     target_buf = buf
                     break
 
@@ -156,7 +157,9 @@ class NeovimManager:
                 )
                 self.nvim.command(f"edit {escaped_path}")
                 target_buf = self.nvim.api.get_current_buf()
-
+            
+            # Ensure we are operating on the correct buffer
+            self.nvim.api.set_current_buf(target_buf)
             self.nvim.api.buf_set_lines(target_buf, 0, -1, True, content_lines)
             return True
         except pynvim.NvimError as e:
@@ -177,3 +180,48 @@ class NeovimManager:
             print_success("Save complete.")
         except pynvim.NvimError as e:
             print_error(f"  -> Neovim API Error saving buffers: {e}")
+
+    def revert_file(self, file_path: str, action: str) -> bool:
+        """
+        Opens a file, applies one undo operation, and saves it. If the action
+        was 'create', it deletes the file if it becomes empty after undo.
+        """
+        if not self.nvim:
+            raise ConnectionError("Not connected to any Neovim instance.")
+
+        abs_file_path = os.path.abspath(file_path)
+        if not os.path.exists(abs_file_path) and action == 'modify':
+             print_warning(f"\nFile '{file_path}' does not exist. Cannot revert modification.")
+             return False # Or True if we consider it a "successful" no-op revert
+
+        try:
+            escaped_path = self.nvim.api.call_function("fnameescape", [abs_file_path])
+            # Open the file, discarding any unsaved changes in the buffer.
+            self.nvim.command(f"edit! {escaped_path}")
+            target_buf = self.nvim.api.get_current_buf()
+
+            self.nvim.command("undo")
+
+            # For 'create' actions, if undo results in an empty buffer, delete the file.
+            if action == "create":
+                # An empty buffer returns [] for its lines.
+                lines = self.nvim.api.buf_get_lines(target_buf, 0, -1, False)
+                if not lines:
+                    # Wipe the buffer from memory and delete the file from disk.
+                    self.nvim.command("bwipeout!")
+                    try:
+                        os.remove(abs_file_path)
+                    except FileNotFoundError:
+                        pass # File already gone, which is fine.
+                    except OSError as e:
+                        print_error(f"\nFailed to delete reverted file '{file_path}': {e}")
+                        return False
+                    return True
+
+            # For 'modify' actions or non-empty 'create' reverts, save the undone state.
+            self.nvim.command("write")
+            return True
+        except pynvim.NvimError as e:
+            print_error(f"\nError reverting '{file_path}': {e}")
+            return False
+

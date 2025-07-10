@@ -6,6 +6,7 @@ src/itf/editor.py
 src/itf/parser.py
 src/itf/patcher.py
 src/itf/printer.py
+src/itf/state.py
 src/itf.egg-info/PKG-INFO
 src/itf.egg-info/SOURCES.txt
 src/itf.egg-info/dependency_links.txt

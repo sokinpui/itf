@@ -12,6 +12,7 @@ from .printer import (
     print_header, print_info, print_success, print_error,
     print_warning, prompt_user, print_path, ProgressBar
 )
+from .state import read_last_run_state, write_last_run_state, STATE_FILE_NAME
 
 
 SOURCE_FILE_NAME = "itf.txt"
@@ -88,6 +89,11 @@ def _handle_block_mode(content: str, args):
         print_warning("No valid file blocks found to process.")
         sys.exit(0)
 
+    # Determine actions and directories to create before any modifications
+    file_actions = {
+        os.path.abspath(fp): "create" if not os.path.exists(fp) else "modify"
+        for fp, _ in file_blocks
+    }
     directories_to_create = set()
     for file_path, _ in file_blocks:
         abs_file_path = os.path.abspath(file_path)
@@ -112,15 +118,25 @@ def _handle_block_mode(content: str, args):
 
         print_header("\n--- Update Summary ---", file=sys.stdout)
         if updated_files:
-            print_success(f"Successfully updated {len(updated_files)} file(s):", file=sys.stdout)
+            print_success(f"Successfully updated {len(updated_files)} file(s) in Neovim:", file=sys.stdout)
             for f in updated_files:
                 print(f"  - {f}", file=sys.stdout)
         if failed_files:
             print_error(f"Failed to process {len(failed_files)} file(s):", file=sys.stdout)
             for f in failed_files:
                 print(f"  - {f}", file=sys.stdout)
-        if args.save:
-            manager.save_all_buffers()
+
+        if updated_files:
+            if args.save:
+                manager.save_all_buffers()
+                successful_ops = [
+                    {"path": os.path.abspath(f), "action": file_actions[os.path.abspath(f)]}
+                    for f in updated_files
+                ]
+                write_last_run_state(successful_ops)
+            else:
+                print_warning("\nChanges are not saved to disk. Use --save to persist changes.", file=sys.stdout)
+                print_warning("Revert will not be available for this operation.", file=sys.stdout)
 
 
 def _handle_diff_mode(content: str, args):
@@ -130,9 +146,14 @@ def _handle_diff_mode(content: str, args):
         print_error("`patch` command not found. Please install it to use the --diff feature.")
         sys.exit(1)
 
-    # Pre-scan for directory creation
+    # Pre-scan for directory creation and action type
+    target_paths = list(extract_target_paths(content))
+    file_actions = {
+        os.path.abspath(fp): "create" if not os.path.exists(fp) else "modify"
+        for fp in target_paths
+    }
     directories_to_create = set()
-    for file_path in extract_target_paths(content):
+    for file_path in target_paths:
         abs_file_path = os.path.abspath(file_path)
         target_dir = os.path.dirname(abs_file_path)
         if target_dir and not os.path.exists(target_dir):
@@ -182,8 +203,70 @@ def _handle_diff_mode(content: str, args):
         if failed_loading:
             print_warning(f"Patched but failed to load {len(failed_loading)} file(s) into Neovim:", file=sys.stdout)
             for f in failed_loading: print(f"  - {f}", file=sys.stdout)
-        if args.save:
-            manager.save_all_buffers()
+
+        if updated_files:
+            if args.save:
+                manager.save_all_buffers()
+                successful_ops = [
+                    {"path": os.path.abspath(f), "action": file_actions[os.path.abspath(f)]}
+                    for f in updated_files
+                ]
+                write_last_run_state(successful_ops)
+            else:
+                print_warning("\nFiles patched on disk, but not saved in Neovim's undo history.", file=sys.stdout)
+                print_warning("Revert is not available for this operation. Use --save to enable.", file=sys.stdout)
+
+
+def _handle_revert(args):
+    """Workflow for reverting the last saved operation."""
+    print_header("--- Reverting last operation ---")
+    ops_to_revert = read_last_run_state()
+    if not ops_to_revert:
+        sys.exit(1)
+
+    print_info(f"Found {len(ops_to_revert)} file(s) from the last operation to revert:")
+    for op in ops_to_revert:
+        print_path(f"- {op['path']} (action: {op['action']})")
+
+    try:
+        response = prompt_user("Do you want to revert these changes? (y/N):").lower()
+        if response != 'y':
+            print_warning("Revert operation declined. Exiting.")
+            sys.exit(0)
+    except (EOFError, KeyboardInterrupt):
+        print_warning("\nOperation cancelled by user. Exiting.")
+        sys.exit(0)
+
+    reverted_files, failed_files = [], []
+    with NeovimManager() as manager:
+        progress_bar = ProgressBar(total=len(ops_to_revert), prefix='Reverting files:')
+        progress_bar.update(0)
+
+        for op in ops_to_revert:
+            if manager.revert_file(op['path'], op['action']):
+                reverted_files.append(op['path'])
+            else:
+                failed_files.append(op['path'])
+            progress_bar.update()
+        progress_bar.finish()
+
+    print_header("\n--- Revert Summary ---", file=sys.stdout)
+    if reverted_files:
+        print_success(f"Successfully reverted {len(reverted_files)} file(s):", file=sys.stdout)
+        for f in reverted_files:
+            print(f"  - {f}", file=sys.stdout)
+    if failed_files:
+        print_error(f"Failed to revert {len(failed_files)} file(s):", file=sys.stdout)
+        for f in failed_files:
+            print(f"  - {f}", file=sys.stdout)
+
+    if reverted_files and not failed_files:
+        state_path = os.path.join(os.getcwd(), STATE_FILE_NAME)
+        try:
+            os.remove(state_path)
+            print_info(f"\nSuccessfully reverted all changes and removed state file '{state_path}'.")
+        except OSError as e:
+            print_warning(f"Could not remove state file: {e}")
 
 
 def main():
@@ -194,7 +277,7 @@ def main():
     parser.add_argument(
         "--save",
         action="store_true",
-        help="Save all modified buffers in Neovim after the update.",
+        help="Save all modified buffers in Neovim after the update. Required to enable --revert.",
     )
     parser.add_argument(
         "-c", "--clipboard",
@@ -206,7 +289,17 @@ def main():
         action="store_true",
         help="Parse content as diffs and apply them as patches.",
     )
+    parser.add_argument(
+        "--revert",
+        action="store_true",
+        help="Revert the last change made with --save.",
+    )
     args = parser.parse_args()
+
+    # Handle revert as a standalone action
+    if args.revert:
+        _handle_revert(args)
+        sys.exit(0)
 
     content = ""
     if args.clipboard:
@@ -241,3 +334,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
