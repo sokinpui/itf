@@ -135,7 +135,7 @@ def _handle_block_mode(content: str, args):
                 ]
                 write_last_run_state(successful_ops)
             else:
-                print_warning("\nChanges are not saved to disk. Use --save to persist changes.", file=sys.stdout)
+                print_warning("\nChanges are not saved to disk. Use -s/--save to persist changes.", file=sys.stdout)
                 print_warning("Revert will not be available for this operation.", file=sys.stdout)
 
 
@@ -214,7 +214,7 @@ def _handle_diff_mode(content: str, args):
                 write_last_run_state(successful_ops)
             else:
                 print_warning("\nFiles patched on disk, but not saved in Neovim's undo history.", file=sys.stdout)
-                print_warning("Revert is not available for this operation. Use --save to enable.", file=sys.stdout)
+                print_warning("Revert is not available for this operation. Use -s/--save to enable.", file=sys.stdout)
 
 
 def _handle_revert(args):
@@ -275,9 +275,9 @@ def main():
         description=f"Parse '{SOURCE_FILE_NAME}' or clipboard content and update files, then load into Neovim."
     )
     parser.add_argument(
-        "--save",
+        "-s", "--save",
         action="store_true",
-        help="Save all modified buffers in Neovim after the update. Required to enable --revert.",
+        help="Save all modified buffers in Neovim after the update. Required to enable -r/--revert.",
     )
     parser.add_argument(
         "-c", "--clipboard",
@@ -290,9 +290,9 @@ def main():
         help="Parse content as diffs and apply them as patches.",
     )
     parser.add_argument(
-        "--revert",
+        "-r", "--revert",
         action="store_true",
-        help="Revert the last change made with --save.",
+        help="Revert the last change made with -s/--save.",
     )
     args = parser.parse_args()
 
