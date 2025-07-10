@@ -35,6 +35,9 @@ itf --save
 # parse from clipboard and save to disk
 itf --save --clipboard
 
+# revert last change
+itf --revert
+
 # help
 itf --help
 ```
