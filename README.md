@@ -18,7 +18,7 @@ Don't have cash for Cursor AI...
 ```
 git clone https://github.com/sokinpui/itf.git itf
 cd itf
-pip install .
+pipx install .
 ```
 
 # Usage
