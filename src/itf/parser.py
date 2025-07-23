@@ -3,8 +3,10 @@ import re
 from typing import Iterator, Tuple
 
 # Regex to find a complete markdown-style code block.
+# This version is more robust, handling cases where the closing ``` is not on a
+# new line. It still requires a file path comment on the first line.
 FILE_BLOCK_REGEX = re.compile(
-    r"```[a-z]*\n(?P<content_with_header>(?:#|//|/\*)\s*.*?\n.*?)\n```", re.DOTALL
+    r"```[a-z]*\n(?P<content_with_header>(?:#|//|/\*)\s*.*?\n.*?)\n?```", re.DOTALL
 )
 
 # Regex to extract a file path from the first line of a block's content.
@@ -17,7 +19,8 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, list[str]]]:
     Parses content for file blocks and yields file paths and their content.
 
     A file block is a markdown code block where the first line is a comment
-    containing the target file path.
+    containing the target file path. This implementation is robust against
+    malformed closing fences.
 
     Args:
         source_content: The string content to parse.
@@ -36,6 +39,10 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, list[str]]]:
             continue
 
         file_path = path_match.group("path").strip()
+
+        # After stripping comment markers and whitespace, if the path is empty, skip.
+        if not file_path:
+            continue
 
         # The content to be written includes the header line (with the file path).
         lines_to_write = [header] + content_lines
