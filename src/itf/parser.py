@@ -1,26 +1,80 @@
 # src/itf/parser.py
+import os
 import re
-from typing import Iterator, Tuple
+from typing import Iterator, List, Tuple
 
-# Regex to find a complete markdown-style code block.
-# This version is more robust, handling cases where the closing ``` is not on a
-# new line. It still requires a file path comment on the first line.
-FILE_BLOCK_REGEX = re.compile(
-    r"```[a-z]*\n(?P<content_with_header>(?:#|//|/\*)\s*.*?\n.*?)\n?```", re.DOTALL
+
+def _get_comment_format(file_path: str) -> Tuple[str, str]:
+    """
+    Determines the comment syntax (prefix, suffix) for a given file path.
+    Returns a tuple, e.g., ("#", "") for Python or ("/*", "*/") for CSS.
+    """
+    filename = os.path.basename(file_path)
+    _, extension = os.path.splitext(filename)
+    ext = extension.lower()
+
+    # (prefix, suffix)
+    syntax_map = {
+        ".py": ("#", ""),
+        ".rb": ("#", ""),
+        ".sh": ("#", ""),
+        ".yaml": ("#", ""),
+        ".yml": ("#", ""),
+        ".dockerfile": ("#", ""),
+        ".js": ("//", ""),
+        ".ts": ("//", ""),
+        ".java": ("//", ""),
+        ".c": ("//", ""),
+        ".cpp": ("//", ""),
+        ".h": ("//", ""),
+        ".hpp": ("//", ""),
+        ".cs": ("//", ""),
+        ".go": ("//", ""),
+        ".rs": ("//", ""),
+        ".dart": ("//", ""),
+        ".kt": ("//", ""),
+        ".kts": ("//", ""),
+        ".swift": ("//", ""),
+        ".scala": ("//", ""),
+        ".scss": ("//", ""),
+        ".less": ("//", ""),
+        ".sql": ("--", ""),
+        ".lua": ("--", ""),
+        ".html": ("<!--", "-->"),
+        ".xml": ("<!--", "-->"),
+        ".css": ("/*", "*/"),
+    }
+
+    # Handle files with special names or no extension
+    if "makefile" in filename.lower():
+        return "#", ""
+
+    # Default to a common C-style syntax if not found
+    return syntax_map.get(ext, ("//", ""))
+
+
+# Regex to find an optional file path hint followed by a markdown code block.
+BLOCK_WITH_OPTIONAL_HINT_REGEX = re.compile(
+    r"(?:^\s*`(?P<path_hint>[^`\n]+)`\s*\n)?"  # Optional: `path/hint` on the line before
+    r"```[a-z]*\n"  # Start of code block
+    r"(?P<content>.*?)\n?"  # Content inside the block
+    r"```",  # End of code block
+    re.DOTALL | re.MULTILINE,
 )
 
-# Regex to extract a file path from the first line of a block's content.
-# Supports C-style (#), C++-style (//), and block comments (/* ... */).
+# Regex to extract a file path from a comment on the first line of content.
 PATH_EXTRACT_REGEX = re.compile(r"^(?:#|//|/\*)\s*(?P<path>.*?)\s*(?:\*/)?$")
 
 
-def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, list[str]]]:
+def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
     """
     Parses content for file blocks and yields file paths and their content.
 
-    A file block is a markdown code block where the first line is a comment
-    containing the target file path. This implementation is robust against
-    malformed closing fences.
+    It handles two ways of specifying a file path:
+    1. An explicit path in a comment on the first line of the code block (preferred).
+    2. A path on its own line in backticks just before the code block.
+
+    If a path is specified in both places, the one inside the block is used.
 
     Args:
         source_content: The string content to parse.
@@ -28,23 +82,43 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, list[str]]]:
     Yields:
         A tuple containing the extracted file path and a list of content lines.
     """
-    for match in FILE_BLOCK_REGEX.finditer(source_content):
-        content_with_header = match.group("content_with_header")
+    for match in BLOCK_WITH_OPTIONAL_HINT_REGEX.finditer(source_content):
+        path_hint = match.group("path_hint")
+        content = match.group("content")
 
-        # The header is the first line, the rest is the actual content.
-        header, *content_lines = content_with_header.split("\n")
+        # rstrip to prevent a trailing newline in the block from creating
+        # an extra empty line at the end. Then split into lines.
+        content_lines = content.rstrip("\n").split("\n")
 
-        path_match = PATH_EXTRACT_REGEX.search(header.strip())
-        if not path_match:
-            continue
+        # If the block was empty or just whitespace, treat as empty list.
+        if content_lines == [""]:
+            content_lines = []
 
-        file_path = path_match.group("path").strip()
+        first_line = content_lines[0].strip() if content_lines else ""
 
-        # After stripping comment markers and whitespace, if the path is empty, skip.
+        file_path = None
+        lines_to_write = content_lines
+
+        # Case 1: Path is embedded as a comment in the first line of the block.
+        path_match = PATH_EXTRACT_REGEX.search(first_line)
+        if path_match:
+            extracted_path = path_match.group("path").strip()
+            if extracted_path:
+                file_path = extracted_path
+                # Content is used as-is, as it already contains the header.
+                lines_to_write = content_lines
+
+        # Case 2: No embedded path, but a path hint was found before the block.
+        elif path_hint:
+            hinted_path = path_hint.strip()
+            if hinted_path:
+                file_path = hinted_path
+                # Prepend the file path as a commented header.
+                prefix, suffix = _get_comment_format(file_path)
+                header = f"{prefix} {file_path} {suffix}".strip()
+                lines_to_write = [header] + content_lines
+
         if not file_path:
             continue
-
-        # The content to be written includes the header line (with the file path).
-        lines_to_write = [header] + content_lines
 
         yield file_path, lines_to_write
