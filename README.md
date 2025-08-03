@@ -1,10 +1,10 @@
-# ITF: Insert To File (The "True Vibe Coding" Companion)
+# ITF: Insert To File
 
-Tired of copying code from LLM Web interfaces? I am.
-Too lazy to paste into multiple files? Same.
-Don't have cash for Cursor AI? You're in the right place.
+Tired of copying code from LLM Web interfaces.
+Too lazy to paste into multiple files.
+Don't have cash for Cursor AI.
 
-`itf` is a command-line tool that parses LLM-generated code snippets from a local file or your clipboard and loads the content directly into your Neovim buffers. It can handle both full file replacements and applying `diff` patches, streamlining the process of transferring code from a prompt to your project.
+`itf` is a command-line tool that parses LLM-generated code snippets from a local file or your clipboard and loads the content directly into Neovim buffers. It can handle both full file replacements and applying `diff` patches, streamlining the process of transferring code from a prompt to your project.
 
 # Features
 
@@ -25,7 +25,7 @@ Don't have cash for Cursor AI? You're in the right place.
 - **`patch`**: The standard command-line patch utility.
   - **Debian/Ubuntu**: `sudo apt install build-essential`
   - **macOS**: `xcode-select --install`
-  - **Windows**: Available with [Git for Windows](https://git-scm.com/download/win) (in Git Bash) or WSL.
+  - **Windows**: Use Linux or MacOS
 
 # Installation
 
