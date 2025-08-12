@@ -2,7 +2,8 @@
 import os
 import re
 import subprocess
-from typing import Iterator, Tuple
+import tempfile
+from typing import Iterator, List, Tuple
 
 from .printer import print_error, print_info, print_success, print_warning
 
@@ -10,8 +11,7 @@ from .printer import print_error, print_info, print_success, print_warning
 DIFF_BLOCK_REGEX = re.compile(r"```diff\n(.*?)\n```", re.DOTALL)
 
 # Regex to extract a file path from a '+++ b/...' line in a diff.
-# It handles potential trailing metadata like timestamps.
-FILE_PATH_REGEX = re.compile(r"^\+\+\+ b/(?P<path>.*?)(\s|$)")
+FILE_PATH_REGEX = re.compile(r"^\+\+\+ b/(?P<path>.*?)(\s|$)", re.MULTILINE)
 
 
 def extract_target_paths(source_content: str) -> Iterator[str]:
@@ -26,81 +26,83 @@ def extract_target_paths(source_content: str) -> Iterator[str]:
             yield path_match.group("path").strip()
 
 
-def _apply_patch(patch_content: str, file_path_for_logging: str) -> bool:
+def generate_patched_contents(source_content: str) -> Iterator[Tuple[str, List[str]]]:
     """
-    Applies a single patch using the system's `patch` command.
+    Finds diff blocks and yields the patched content without modifying disk files.
 
-    Args:
-        patch_content: The full text of the diff to apply.
-        file_path_for_logging: The path to the file used for logging messages.
-
-    Returns:
-        True if the patch was applied successfully, False otherwise.
-    """
-    try:
-        # Use '-p1' to strip the 'a/' and 'b/' prefixes from paths.
-        # '-N' ignores patches that seem to be already applied.
-        # '--no-backup-if-mismatch' prevents creation of .rej/.orig files.
-        command = ["patch", "-p1", "-N", "--no-backup-if-mismatch"]
-        result = subprocess.run(
-            command,
-            input=patch_content,
-            text=True,
-            capture_output=True,
-            cwd=os.getcwd(),  # Run from the current working directory
-        )
-
-        if result.returncode != 0:
-            print_error(f"  -> Failed to patch: {file_path_for_logging}")
-            error_details = result.stderr.strip()
-            print_error(f"     `patch` command failed:\n{error_details}")
-            return False
-
-        print_success(f"  -> Successfully patched: {file_path_for_logging}")
-        if result.stdout:
-            print_info(f"     {result.stdout.strip()}")
-        return True
-
-    except FileNotFoundError:
-        # This check is primarily done in __main__, but serves as a safeguard.
-        print_error("`patch` command not found. It must be installed and in your PATH.")
-        return False
-    except Exception as e:
-        print_error(f"An unexpected error occurred while running `patch`: {e}")
-        return False
-
-
-def find_and_apply_patches(source_content: str) -> Iterator[Tuple[str, bool]]:
-    """
-    Finds diff blocks, applies them via the `patch` command, and yields results.
-
-    This function modifies files on the filesystem directly.
-
-    Args:
-        source_content: The string content containing one or more diff blocks.
+    For each diff, it reads the original file, applies the patch to a temporary
+    copy, reads the result, and yields the final content lines.
 
     Yields:
-        A tuple containing the file path and a boolean indicating success.
+        A tuple of (file_path, list_of_patched_content_lines).
     """
     diff_matches = list(DIFF_BLOCK_REGEX.finditer(source_content))
     if not diff_matches:
         print_warning("No '```diff' blocks found in the source content.")
         return
 
-    print_info(f"Found {len(diff_matches)} diff block(s) to apply.")
+    print_info(f"Found {len(diff_matches)} diff block(s) to process.")
 
     for match in diff_matches:
         patch_content = match.group(1).strip()
-        if not patch_content.endswith('\n'):
-            patch_content += '\n'
+        if not patch_content:
+            continue
+        if not patch_content.endswith("\n"):
+            patch_content += "\n"
 
         path_match = FILE_PATH_REGEX.search(patch_content)
         if not path_match:
-            print_warning("  -> Found a diff block but could not extract a file path. Skipping.")
-            print_warning(f"     Block starts with: '{patch_content.splitlines()[0]}'")
+            print_warning(
+                "  -> Found a diff block but could not extract a file path. Skipping."
+            )
+            print_warning(f"     Block starts with: '{patch_content.splitlines()}'")
             continue
 
         file_path = path_match.group("path").strip()
-        success = _apply_patch(patch_content, file_path)
-        yield file_path, success
+        abs_file_path = os.path.abspath(file_path)
 
+        # Determine the source file for patching. If the target file doesn't exist,
+        # patch will operate against an empty temporary file (like /dev/null).
+        source_for_patch = abs_file_path
+        dummy_path = None
+        if not os.path.exists(source_for_patch):
+            dummy_fd, dummy_path = tempfile.mkstemp()
+            os.close(dummy_fd)
+            source_for_patch = dummy_path
+
+        # Create a temporary file to hold the output of the patch command.
+        output_fd, output_path = tempfile.mkstemp()
+        os.close(output_fd)
+
+        try:
+            # Command: patch -p1 -o <output_file> <source_file>
+            # The patch content itself is piped to stdin.
+            command = ["patch", "-p1", "-o", output_path, source_for_patch]
+            result = subprocess.run(
+                command,
+                input=patch_content,
+                text=True,
+                capture_output=True,
+                cwd=os.getcwd(),
+            )
+
+            if result.returncode != 0:
+                print_error(f"  -> Failed to generate patch for: {file_path}")
+                error_details = result.stderr.strip()
+                print_error(f"     `patch` command failed:\n{error_details}")
+                continue
+
+            print_success(f"  -> Successfully generated patch for: {file_path}")
+            if result.stdout:
+                print_info(f"     {result.stdout.strip()}")
+
+            with open(output_path, "r", encoding="utf-8") as f:
+                patched_lines = [line.rstrip("\n") for line in f.readlines()]
+
+            yield file_path, patched_lines
+
+        finally:
+            # Clean up temporary files.
+            if dummy_path:
+                os.remove(dummy_path)
+            os.remove(output_path)
