@@ -5,9 +5,15 @@ import shutil
 import subprocess
 import sys
 
+from .diff_corrector import correct_diff
 from .editor import NeovimManager
-from .parser import parse_file_blocks  # Updated to ignore diff blocks
-from .patcher import extract_target_paths, generate_patched_contents
+from .parser import parse_file_blocks
+from .patcher import (
+    DIFF_BLOCK_REGEX,
+    FILE_PATH_REGEX,
+    extract_target_paths,
+    generate_patched_contents,
+)
 from .printer import (
     ProgressBar,
     print_error,
@@ -332,6 +338,43 @@ def _handle_revert(args):
             print_warning(f"Could not remove state file: {e}")
 
 
+def _handle_output_diff_fix(content: str):
+    """
+    Parses content for diff blocks, corrects them, and prints the
+    corrected diffs to stdout.
+    """
+    corrected_diffs = []
+    for match in DIFF_BLOCK_REGEX.finditer(content):
+        patch_content_raw = match.group(1).strip()
+        if not patch_content_raw:
+            continue
+
+        path_match = FILE_PATH_REGEX.search(patch_content_raw)
+        if not path_match:
+            continue
+
+        file_path = path_match.group("path").strip()
+        abs_file_path = os.path.abspath(file_path)
+
+        source_lines = []
+        if os.path.exists(abs_file_path):
+            try:
+                with open(abs_file_path, "r", encoding="utf-8") as f:
+                    source_lines = [line.rstrip("\n") for line in f.readlines()]
+            except IOError:
+                source_lines = []
+
+        corrected_patch = correct_diff(
+            source_lines, patch_content_raw, file_path
+        )
+
+        if corrected_patch:
+            corrected_diffs.append(corrected_patch)
+
+    if corrected_diffs:
+        print("".join(corrected_diffs), end="")
+
+
 def main():
     """Main entry point for the 'itf' command-line tool."""
     parser = argparse.ArgumentParser(
@@ -360,6 +403,12 @@ def main():
         "--auto",
         action="store_true",
         help="Smart mode. Reads from clipboard or itf.txt and processes both file blocks and diffs.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-diff-fix",
+        action="store_true",
+        help="Corrects diffs from input and prints them to stdout. Overrides other actions.",
     )
     parser.add_argument(
         "-r",
@@ -416,6 +465,11 @@ def main():
             sys.exit(1)
         with open(source_path, "r", encoding="utf-8") as f:
             content = f.read()
+
+    # Handle special action that outputs to stdout and exits.
+    if args.output_diff_fix:
+        _handle_output_diff_fix(content)
+        sys.exit(0)
 
     try:
         if args.auto:
