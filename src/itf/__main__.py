@@ -6,9 +6,7 @@ import subprocess
 import sys
 
 from .editor import NeovimManager
-from .parser import parse_file_blocks
-
-# MODIFIED: Import the new function and remove the old ones
+from .parser import parse_file_blocks  # Updated to ignore diff blocks
 from .patcher import extract_target_paths, generate_patched_contents
 from .printer import (
     ProgressBar,
@@ -25,10 +23,11 @@ from .state import STATE_FILE_NAME, read_last_run_state, write_last_run_state
 SOURCE_FILE_NAME = "itf.txt"
 
 
-def get_clipboard_content() -> str:
+def get_clipboard_content(exit_on_empty: bool = True) -> str:
     """
     Retrieves content from the system clipboard using platform-specific tools.
     """
+    # The rest of the function remains the same...
     platform = sys.platform
     command = []
 
@@ -53,8 +52,10 @@ def get_clipboard_content() -> str:
     try:
         content = subprocess.check_output(command, text=True, stderr=subprocess.PIPE)
         if not content.strip():
-            print_warning("Clipboard is empty. Nothing to process.")
-            sys.exit(0)
+            if exit_on_empty:
+                print_warning("Clipboard is empty. Nothing to process.")
+                sys.exit(0)
+            return ""
         return content
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print_error(f"Failed to get clipboard content using '{' '.join(command)}': {e}")
@@ -93,14 +94,10 @@ def _confirm_and_create_directories(dirs_to_create: set[str]):
             sys.exit(1)
 
 
-def _handle_block_mode(content: str, args):
-    """Workflow for replacing file contents based on code blocks."""
-    file_blocks = list(parse_file_blocks(content))
-    if not file_blocks:
-        print_warning("No valid file blocks found to process.")
-        sys.exit(0)
-
-    # Determine actions and directories to create before any modifications
+def _apply_changes_in_nvim(
+    file_blocks: list[tuple[str, list[str]]], file_actions: dict[str, str], args
+):
+    """Applies a list of file content changes through Neovim and handles saving."""
     file_actions = {
         os.path.abspath(fp): "create" if not os.path.exists(fp) else "modify"
         for fp, _ in file_blocks
@@ -111,8 +108,6 @@ def _handle_block_mode(content: str, args):
         target_dir = os.path.dirname(abs_file_path)
         if target_dir and not os.path.exists(target_dir):
             directories_to_create.add(target_dir)
-
-    _confirm_and_create_directories(directories_to_create)
 
     updated_files, failed_files = [], []
     with NeovimManager() as manager:
@@ -163,17 +158,34 @@ def _handle_block_mode(content: str, args):
                 )
 
 
-def _handle_diff_mode(content: str, args):
-    """Workflow for patching files based on diff blocks."""
-    print_header("--- Parsing content as diffs and generating changes ---")
-    if not shutil.which("patch"):
-        print_error(
-            "`patch` command not found. Please install it to use the --diff feature."
-        )
-        sys.exit(1)
+def _handle_block_mode(content: str, args):
+    """Workflow for replacing file contents based on code blocks."""
+    file_blocks = list(parse_file_blocks(content))
+    if not file_blocks:
+        print_warning("No valid file blocks found to process.")
+        sys.exit(0)
 
-    # Pre-scan for directory creation and action type, same as before.
-    target_paths = list(extract_target_paths(content))
+    # Determine actions and directories to create before any modifications
+    file_actions = {
+        os.path.abspath(fp): "create" if not os.path.exists(fp) else "modify"
+        for fp, _ in file_blocks
+    }
+    directories_to_create = set()
+    for file_path, _ in file_blocks:
+        abs_file_path = os.path.abspath(file_path)
+        target_dir = os.path.dirname(abs_file_path)
+        if target_dir and not os.path.exists(target_dir):
+            directories_to_create.add(target_dir)
+
+    _confirm_and_create_directories(directories_to_create)
+
+    _apply_changes_in_nvim(file_blocks, file_actions, args)
+
+
+def _get_file_actions_and_dirs(
+    target_paths: list[str],
+) -> tuple[dict[str, str], set[str]]:
+    """Computes file actions and directories to create from a list of paths."""
     file_actions = {
         os.path.abspath(fp): "create" if not os.path.exists(fp) else "modify"
         for fp in target_paths
@@ -184,62 +196,84 @@ def _handle_diff_mode(content: str, args):
         target_dir = os.path.dirname(abs_file_path)
         if target_dir and not os.path.exists(target_dir):
             directories_to_create.add(target_dir)
+    return file_actions, directories_to_create
+
+
+def _handle_diff_mode(content: str, args):
+    """Workflow for patching files based on diff blocks."""
+    print_header("--- Parsing content as diffs and generating changes ---")
+    if not shutil.which("patch"):
+        print_error(
+            "`patch` command not found. Please install it to use the --diff feature."
+        )
+        sys.exit(1)
+
+    target_paths = list(extract_target_paths(content))
+    if not target_paths:
+        print_warning("No '```diff' blocks with file paths found. Nothing to do.")
+        sys.exit(0)
+
+    file_actions, directories_to_create = _get_file_actions_and_dirs(target_paths)
     _confirm_and_create_directories(directories_to_create)
 
-    # MODIFIED: This section is now almost identical to _handle_block_mode.
-    # It generates the content first, then applies it through Neovim.
     file_blocks = list(generate_patched_contents(content))
     if not file_blocks:
         print_warning("No valid changes were generated from the diff blocks.")
         sys.exit(0)
 
-    updated_files, failed_files = [], []
-    with NeovimManager() as manager:
-        progress_bar = ProgressBar(total=len(file_blocks), prefix="Updating buffers:")
-        progress_bar.update(0)
+    _apply_changes_in_nvim(file_blocks, file_actions, args)
 
-        for file_path, content_lines in file_blocks:
-            if manager.update_buffer(file_path, content_lines):
-                updated_files.append(file_path)
-            else:
-                failed_files.append(file_path)
-            progress_bar.update()
-        progress_bar.finish()
 
-        print_header("\n--- Update Summary ---", file=sys.stdout)
-        if updated_files:
-            print_success(
-                f"Successfully loaded {len(updated_files)} change(s) into Neovim:",
-                file=sys.stdout,
-            )
-            for f in updated_files:
-                print(f"  - {f}", file=sys.stdout)
-        if failed_files:
-            print_error(
-                f"Failed to process {len(failed_files)} file(s):", file=sys.stdout
-            )
-            for f in failed_files:
-                print(f"  - {f}", file=sys.stdout)
+def _handle_auto_mode(content: str, args):
+    """Workflow for applying both file blocks and diffs from a single source."""
+    print_header("--- Auto-detecting and applying changes ---")
+    if not shutil.which("patch"):
+        print_error("`patch` command not found. It is required for --auto mode.")
+        sys.exit(1)
 
-        if updated_files:
-            if args.save:
-                manager.save_all_buffers()
-                successful_ops = [
-                    {
-                        "path": os.path.abspath(f),
-                        "action": file_actions[os.path.abspath(f)],
-                    }
-                    for f in updated_files
-                ]
-                write_last_run_state(successful_ops)
-            else:
-                print_warning(
-                    "\nChanges are not saved to disk. Use -s/--save to persist changes.",
-                    file=sys.stdout,
-                )
-                print_warning(
-                    "Revert will not be available for this operation.", file=sys.stdout
-                )
+    # 1. Get all target paths and determine actions/directories first.
+    diff_target_paths = list(extract_target_paths(content))
+    normal_file_blocks_initial = list(parse_file_blocks(content))
+    block_target_paths = [fp for fp, _ in normal_file_blocks_initial]
+
+    all_target_paths = diff_target_paths + block_target_paths
+    if not all_target_paths:
+        print_warning("No valid file blocks or diffs found to process.")
+        sys.exit(0)
+
+    file_actions, directories_to_create = _get_file_actions_and_dirs(all_target_paths)
+    _confirm_and_create_directories(directories_to_create)
+
+    # 2. Generate/parse content.
+    print_info("\nGenerating patched content from diffs...")
+    diff_file_blocks = list(generate_patched_contents(content))
+    normal_file_blocks = normal_file_blocks_initial  # Use cached result
+
+    # 3. Combine, with warning for overwrites.
+    paths_from_diffs = {os.path.abspath(fp) for fp, _ in diff_file_blocks}
+    paths_from_blocks = {os.path.abspath(fp) for fp, _ in normal_file_blocks}
+    intersection = paths_from_diffs.intersection(paths_from_blocks)
+
+    if intersection:
+        print_warning(
+            "\nWarning: The following files are targeted by both a diff and a file block:"
+        )
+        for p in sorted(list(intersection)):
+            print_path(f"- {p}")
+        print_warning("The file block content will overwrite the diff patch result.")
+
+    final_file_blocks_map = {}
+    # Diffs go in first
+    for fp, content_lines in diff_file_blocks:
+        final_file_blocks_map[os.path.abspath(fp)] = (fp, content_lines)
+    # Normal blocks go in second, overwriting any conflicts
+    for fp, content_lines in normal_file_blocks:
+        final_file_blocks_map[os.path.abspath(fp)] = (fp, content_lines)
+
+    file_blocks = list(final_file_blocks_map.values())
+
+    # 4. Apply changes.
+    _apply_changes_in_nvim(file_blocks, file_actions, args)
 
 
 def _handle_revert(args):
@@ -322,6 +356,12 @@ def main():
         help="Parse content as diffs and apply them as patches.",
     )
     parser.add_argument(
+        "-a",
+        "--auto",
+        action="store_true",
+        help="Smart mode. Reads from clipboard or itf.txt and processes both file blocks and diffs.",
+    )
+    parser.add_argument(
         "-r",
         "--revert",
         action="store_true",
@@ -334,27 +374,53 @@ def main():
         _handle_revert(args)
         sys.exit(0)
 
+    source_description = ""
     content = ""
-    if args.clipboard:
-        print_header("--- Parsing content from system clipboard ---")
+
+    if args.auto:
+        print_header("--- Auto mode: searching for content ---")
+        # Try clipboard first, but don't exit if it's empty.
+        clipboard_content = get_clipboard_content(exit_on_empty=False)
+        if clipboard_content.strip():
+            content = clipboard_content
+            source_description = "from system clipboard"
+            print_info("-> Found content in clipboard.")
+        else:
+            # Fallback to file
+            source_path = os.path.join(os.getcwd(), SOURCE_FILE_NAME)
+            if os.path.exists(source_path):
+                print_info(
+                    f"-> Clipboard is empty, falling back to '{SOURCE_FILE_NAME}'."
+                )
+                try:
+                    with open(source_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    source_description = f"from '{source_path}'"
+                except IOError as e:
+                    print_error(f"Error reading source file: {e}")
+                    sys.exit(1)
+            else:
+                print_warning(
+                    f"Clipboard is empty and '{SOURCE_FILE_NAME}' not found. Nothing to do."
+                )
+                sys.exit(0)
+    elif args.clipboard:
+        source_description = "from system clipboard"
         content = get_clipboard_content()
     else:
         source_path = os.path.join(os.getcwd(), SOURCE_FILE_NAME)
+        source_description = f"from '{source_path}'"
         if not os.path.exists(source_path):
             print_error(f"Source file '{SOURCE_FILE_NAME}' not found.")
-            print_info(f"Use -c to read from clipboard or -d to apply patches.")
+            print_info(f"Use -c to read from clipboard or -a for auto-detection.")
             sys.exit(1)
-
-        print_header(f"--- Parsing content from '{source_path}' ---")
-        try:
-            with open(source_path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except IOError as e:
-            print_error(f"Error reading source file: {e}")
-            sys.exit(1)
+        with open(source_path, "r", encoding="utf-8") as f:
+            content = f.read()
 
     try:
-        if args.diff:
+        if args.auto:
+            _handle_auto_mode(content, args)
+        elif args.diff:
             _handle_diff_mode(content, args)
         else:
             _handle_block_mode(content, args)

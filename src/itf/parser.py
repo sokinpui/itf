@@ -55,9 +55,9 @@ def _get_comment_format(file_path: str) -> Tuple[str, str]:
 
 # Regex to find an optional file path hint followed by a markdown code block.
 BLOCK_WITH_OPTIONAL_HINT_REGEX = re.compile(
-    r"(?:^\s*`(?P<path_hint>[^`\n]+)`\s*\n)?"  # Optional: `path/hint` on the line before
-    r"```[a-z]*\n"  # Start of code block
-    r"(?P<content>.*?)\n?"  # Content inside the block
+    r"(?:^\s*`(?P<path_hint>[^`\n]+)`\s*\n)?"  # Optional: `path/hint`
+    r"```(?P<lang>[a-z]*)\n"  # Start of code block with optional language
+    r"(?P<content>.*?)\n?"  # Content
     r"```",  # End of code block
     re.DOTALL | re.MULTILINE,
 )
@@ -83,6 +83,11 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
         A tuple containing the extracted file path and a list of content lines.
     """
     for match in BLOCK_WITH_OPTIONAL_HINT_REGEX.finditer(source_content):
+        # In auto mode, diff blocks are handled separately by the patcher.
+        # We must ignore them here to avoid processing them as regular file blocks.
+        if match.group("lang") == "diff":
+            continue
+
         path_hint = match.group("path_hint")
         content = match.group("content")
 
