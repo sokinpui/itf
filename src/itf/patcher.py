@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 from typing import Iterator, List, Tuple
 
+from .diff_corrector import correct_diff
 from .printer import print_error, print_info, print_success, print_warning
 
 # Regex to find a complete markdown-style diff block.
@@ -28,10 +29,11 @@ def extract_target_paths(source_content: str) -> Iterator[str]:
 
 def generate_patched_contents(source_content: str) -> Iterator[Tuple[str, List[str]]]:
     """
-    Finds diff blocks and yields the patched content without modifying disk files.
+    Finds diff blocks, corrects them, and yields the patched content.
 
-    For each diff, it reads the original file, applies the patch to a temporary
-    copy, reads the result, and yields the final content lines.
+    For each diff, it reads the original file, uses the diff corrector to
+    generate a valid patch, applies it to a temporary copy, and yields the
+    final content lines.
 
     Yields:
         A tuple of (file_path, list_of_patched_content_lines).
@@ -44,43 +46,55 @@ def generate_patched_contents(source_content: str) -> Iterator[Tuple[str, List[s
     print_info(f"Found {len(diff_matches)} diff block(s) to process.")
 
     for match in diff_matches:
-        patch_content = match.group(1).strip()
-        if not patch_content:
+        patch_content_raw = match.group(1).strip()
+        if not patch_content_raw:
             continue
-        if not patch_content.endswith("\n"):
-            patch_content += "\n"
 
-        path_match = FILE_PATH_REGEX.search(patch_content)
+        path_match = FILE_PATH_REGEX.search(patch_content_raw)
         if not path_match:
             print_warning(
                 "  -> Found a diff block but could not extract a file path. Skipping."
             )
-            print_warning(f"     Block starts with: '{patch_content.splitlines()}'")
+            print_warning(f"     Block starts with: '{patch_content_raw.splitlines()}'")
             continue
 
         file_path = path_match.group("path").strip()
         abs_file_path = os.path.abspath(file_path)
 
-        # Determine the source file for patching. If the target file doesn't exist,
-        # patch will operate against an empty temporary file (like /dev/null).
+        source_lines = []
         source_for_patch = abs_file_path
         dummy_path = None
-        if not os.path.exists(source_for_patch):
+        if os.path.exists(source_for_patch):
+            try:
+                with open(source_for_patch, "r", encoding="utf-8") as f:
+                    source_lines = [line.rstrip("\n") for line in f.readlines()]
+            except IOError as e:
+                print_error(f"  -> Could not read source file {file_path}: {e}")
+                continue
+        else:
             dummy_fd, dummy_path = tempfile.mkstemp()
             os.close(dummy_fd)
             source_for_patch = dummy_path
 
-        # Create a temporary file to hold the output of the patch command.
+        print_info(f"  -> Correcting diff for: {file_path}")
+        corrected_patch_content = correct_diff(
+            source_lines, patch_content_raw, file_path
+        )
+
+        if not corrected_patch_content:
+            print_warning(
+                f"  -> Diff correction failed or produced no output for {file_path}. Skipping."
+            )
+            continue
+
         output_fd, output_path = tempfile.mkstemp()
         os.close(output_fd)
 
         try:
-            # Command: patch -p1 -o <output_file> <source_file>
-            # The patch content itself is piped to stdin.
             command = ["patch", "-p1", "-o", output_path, source_for_patch]
             result = subprocess.run(
                 command,
-                input=patch_content,
+                input=corrected_patch_content,
                 text=True,
                 capture_output=True,
                 cwd=os.getcwd(),
@@ -102,7 +116,6 @@ def generate_patched_contents(source_content: str) -> Iterator[Tuple[str, List[s
             yield file_path, patched_lines
 
         finally:
-            # Clean up temporary files.
             if dummy_path:
                 os.remove(dummy_path)
             os.remove(output_path)
