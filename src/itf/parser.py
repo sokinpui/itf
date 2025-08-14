@@ -55,7 +55,7 @@ def _get_comment_format(file_path: str) -> Tuple[str, str]:
 
 # Regex to find an optional file path hint followed by a markdown code block.
 BLOCK_WITH_OPTIONAL_HINT_REGEX = re.compile(
-    r"(?:^\s*`(?P<path_hint>[^`\n]+)`\s*\n)?"  # Optional: `path/hint`
+    r"(?:^.*?`(?P<path_hint>[^`\n]+)`.*\n)?"  # Optional: `path/hint` on a line, possibly with other text
     r"```(?P<lang>[a-z]*)\n"  # Start of code block with optional language
     r"(?P<content>.*?)\n?"  # Content
     r"```",  # End of code block
