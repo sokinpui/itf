@@ -16,6 +16,7 @@ from ..printer import (
     print_warning,
     prompt_user,
 )
+from ..path_resolver import PathResolver
 from ..source import SourceProvider
 from ..state_manager import StateManager
 
@@ -30,9 +31,12 @@ class Action(abc.ABC):
 
 
 class ContentProcessingAction(Action):
-    def __init__(self, args: argparse.Namespace, state_manager: StateManager):
+    def __init__(
+        self, args: argparse.Namespace, state_manager: StateManager, path_resolver: PathResolver
+    ):
         super().__init__(args)
         self.state_manager = state_manager
+        self.path_resolver = path_resolver
 
     def execute(self) -> None:
         source_provider = SourceProvider(self.args)
@@ -58,16 +62,15 @@ class ContentProcessingAction(Action):
 
     @staticmethod
     def _get_file_actions_and_dirs(
-        target_paths: List[str],
+        target_paths: List[str],  # Expects absolute paths
     ) -> Tuple[Dict[str, str], Set[str]]:
         file_actions = {
-            os.path.abspath(fp): "create" if not os.path.exists(fp) else "modify"
+            fp: "create" if not os.path.exists(fp) else "modify"
             for fp in target_paths
         }
         directories_to_create = set()
         for file_path in target_paths:
-            abs_file_path = os.path.abspath(file_path)
-            target_dir = os.path.dirname(abs_file_path)
+            target_dir = os.path.dirname(file_path)
             if target_dir and not os.path.exists(target_dir):
                 directories_to_create.add(target_dir)
         return file_actions, directories_to_create
@@ -136,10 +139,7 @@ class ContentProcessingAction(Action):
                 if self.args.save:
                     manager.save_all_buffers()
                     successful_ops = [
-                        {
-                            "path": os.path.abspath(f),
-                            "action": file_actions[os.path.abspath(f)],
-                        }
+                        {"path": f, "action": file_actions[f]}
                         for f in updated_files
                     ]
                     self.state_manager.write(successful_ops)

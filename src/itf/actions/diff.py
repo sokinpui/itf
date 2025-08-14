@@ -3,7 +3,7 @@ import shutil
 import sys
 from typing import Dict, List, Set, Tuple
 
-from ..patcher import extract_target_paths, generate_patched_contents
+from ..patcher import generate_patched_contents
 from ..printer import print_error, print_header
 from .base import ContentProcessingAction
 
@@ -19,11 +19,11 @@ class DiffAction(ContentProcessingAction):
             )
             sys.exit(1)
 
-        target_paths = list(extract_target_paths(content))
-        if not target_paths:
+        file_blocks = list(generate_patched_contents(content, self.path_resolver))
+        if not file_blocks:
             return [], {}, set()
 
+        target_paths = [fp for fp, _ in file_blocks]
         file_actions, dirs_to_create = self._get_file_actions_and_dirs(target_paths)
-        file_blocks = list(generate_patched_contents(content))
 
         return file_blocks, file_actions, dirs_to_create

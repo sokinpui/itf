@@ -6,6 +6,7 @@ import tempfile
 from typing import Iterator, List, Tuple
 
 from .diff_corrector import correct_diff
+from .path_resolver import PathResolver
 from .printer import print_error, print_info, print_success, print_warning
 
 # Regex to find a complete markdown-style diff block.
@@ -27,7 +28,9 @@ def extract_target_paths(source_content: str) -> Iterator[str]:
             yield path_match.group("path").strip()
 
 
-def generate_patched_contents(source_content: str) -> Iterator[Tuple[str, List[str]]]:
+def generate_patched_contents(
+    source_content: str, path_resolver: PathResolver
+) -> Iterator[Tuple[str, List[str]]]:
     """
     Finds diff blocks, corrects them, and yields the patched content.
 
@@ -59,12 +62,12 @@ def generate_patched_contents(source_content: str) -> Iterator[Tuple[str, List[s
             continue
 
         file_path = path_match.group("path").strip()
-        abs_file_path = os.path.abspath(file_path)
+        resolved_source_path = path_resolver.resolve_existing(file_path)
 
         source_lines = []
-        source_for_patch = abs_file_path
+        source_for_patch = resolved_source_path
         dummy_path = None
-        if os.path.exists(source_for_patch):
+        if source_for_patch:
             try:
                 with open(source_for_patch, "r", encoding="utf-8") as f:
                     source_lines = [line.rstrip("\n") for line in f.readlines()]
@@ -113,7 +116,8 @@ def generate_patched_contents(source_content: str) -> Iterator[Tuple[str, List[s
             with open(output_path, "r", encoding="utf-8") as f:
                 patched_lines = [line.rstrip("\n") for line in f.readlines()]
 
-            yield file_path, patched_lines
+            # Yield the final absolute path for the file.
+            yield path_resolver.resolve(file_path), patched_lines
 
         finally:
             if dummy_path:

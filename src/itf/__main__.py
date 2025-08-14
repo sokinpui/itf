@@ -48,6 +48,13 @@ def main():
         action="store_true",
         help="Revert the last change made with -s/--save.",
     )
+    parser.add_argument(
+        "-l",
+        "--lookup-dir",
+        nargs="+",
+        metavar="DIR",
+        help="One or more directories to search for files. New files are created in the first directory.",
+    )
     args = parser.parse_args()
 
     try:
