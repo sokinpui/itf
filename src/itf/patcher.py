@@ -10,7 +10,10 @@ from .path_resolver import PathResolver
 from .printer import print_error, print_info, print_success, print_warning
 
 # Regex to find a complete markdown-style diff block.
-DIFF_BLOCK_REGEX = re.compile(r"```diff\n(.*?)\n```", re.DOTALL)
+DIFF_BLOCK_REGEX = re.compile(
+    r"^[`]{3,}\s*diff\s*\n(.*?)\n^[`]{3,}", re.DOTALL | re.MULTILINE
+)
+
 
 # Regex to extract a file path from a '+++ b/...' line in a diff.
 FILE_PATH_REGEX = re.compile(r"^\+\+\+ b/(?P<path>.*?)(\s|$)", re.MULTILINE)

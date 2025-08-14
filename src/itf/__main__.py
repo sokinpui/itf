@@ -25,18 +25,6 @@ def main():
         help="Parse content from the clipboard instead of 'itf.txt'.",
     )
     parser.add_argument(
-        "-d",
-        "--diff",
-        action="store_true",
-        help="Parse content as diffs and apply them as patches.",
-    )
-    parser.add_argument(
-        "-a",
-        "--auto",
-        action="store_true",
-        help="Smart mode. Reads from clipboard or itf.txt and processes both file blocks and diffs.",
-    )
-    parser.add_argument(
         "-o",
         "--output-diff-fix",
         action="store_true",
@@ -55,6 +43,27 @@ def main():
         metavar="DIR",
         help="One or more directories to search for files. New files are created in the first directory.",
     )
+
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "-f",
+        "--file",
+        action="store_true",
+        help="Parse content as full file blocks only, ignoring diffs (default behavior).",
+    )
+    mode_group.add_argument(
+        "-d",
+        "--diff",
+        action="store_true",
+        help="Parse content as diffs only and apply them as patches.",
+    )
+    mode_group.add_argument(
+        "-a",
+        "--auto",
+        action="store_true",
+        help="Smart mode. Process both file blocks and diffs.",
+    )
+
     args = parser.parse_args()
 
     try:
