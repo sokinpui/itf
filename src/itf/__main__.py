@@ -43,6 +43,12 @@ def main():
         metavar="DIR",
         help="One or more directories to search for files. New files are created in the first directory.",
     )
+    parser.add_argument(
+        "-p",
+        "--project-root",
+        action="store_true",
+        help="Automatically find and use the project root (marked by .git) as the lookup directory.",
+    )
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(

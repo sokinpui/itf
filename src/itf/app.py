@@ -13,7 +13,7 @@ class ItfApp:
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self.state_manager = StateManager()
-        self.path_resolver = PathResolver(args.lookup_dir)
+        self.path_resolver = PathResolver(args.lookup_dir, args.project_root)
 
     def run(self):
         try:

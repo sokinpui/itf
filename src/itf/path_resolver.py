@@ -2,13 +2,38 @@
 import os
 from typing import List, Optional
 
+from .printer import print_info
+
 
 class PathResolver:
-    def __init__(self, lookup_dirs: Optional[List[str]]):
+    def __init__(self, lookup_dirs: Optional[List[str]], find_root: bool):
         if lookup_dirs:
             self.lookup_dirs = [os.path.abspath(d) for d in lookup_dirs]
+        elif find_root:
+            project_root = self._find_project_root()
+            if project_root:
+                print_info(f"-> Project root found at: {project_root}")
+                self.lookup_dirs = [project_root]
+            else:
+                self.lookup_dirs = [os.getcwd()]
         else:
             self.lookup_dirs = [os.getcwd()]
+
+    @staticmethod
+    def _find_project_root() -> Optional[str]:
+        """
+        Traverses up from the current directory to find a directory containing '.git'.
+        """
+        current_dir = os.getcwd()
+        while True:
+            if os.path.isdir(os.path.join(current_dir, ".git")):
+                return current_dir
+
+            parent_dir = os.path.dirname(current_dir)
+            if parent_dir == current_dir:  # Reached the filesystem root
+                return None
+
+            current_dir = parent_dir
 
     def resolve(self, relative_path: str) -> str:
         """
