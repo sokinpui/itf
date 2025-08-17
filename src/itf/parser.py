@@ -60,8 +60,9 @@ BLOCK_WITH_OPTIONAL_HINT_REGEX = re.compile(
     # Optional: A "hint line" that isn't a code fence, possibly followed by a blank line.
     r"(?:^(?![`]{3,})(?P<hint_line>[^\n]*)\n(?:\s*\n)?)?"
     r"^[`]{3,}(?P<lang>[a-z]*)\s*\n"  # Start of code block
-    # Content: everything until the next code fence or end of file.
-    r"(?P<content>((?:(?!^`{3,})[\s\S])*))",
+    # Content: everything until the closing code fence (non-greedy).
+    r"(?P<content>[\s\S]*?)"
+    r"^\s*[`]{3,}\s*$",  # Closing fence on its own line
     re.MULTILINE,
 )
 
@@ -106,10 +107,10 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
     Parses content for file blocks and yields file paths and their content.
 
     It handles two ways of specifying a file path:
-    1. An explicit path in a comment on the first line of the code block (preferred).
-    2. A path on its own line in backticks just before the code block.
+    1. A path on its own line (often in backticks) just before the code block (preferred).
+    2. An explicit path in a comment on the first line of the code block.
 
-    If a path is specified in both places, the one inside the block is used.
+    If a path is specified in both places, the one outside the block is used.
 
     Args:
         source_content: The string content to parse.
@@ -138,25 +139,23 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
         first_line = content_lines[0].strip() if content_lines else ""
 
         file_path = None
-        lines_to_write = content_lines
 
-        # Case 1: Path is embedded as a comment in the first line of the block.
-        path_match = PATH_EXTRACT_REGEX.search(first_line)
-        if path_match:
-            extracted_path = path_match.group("path").strip()
-            if extracted_path:
-                file_path = extracted_path
-                # Content is used as-is, as it already contains the header.
-                lines_to_write = content_lines
-
-        # Case 2: No embedded path, but a path hint was found before the block.
-        elif path_hint:
+        # Case 1: Path hint was found before the block. This takes precedence.
+        if path_hint:
             file_path = path_hint
-            # Use the content as-is, without adding a new header. The path hint is
-            # only for targeting the file, not for modifying its content.
-            lines_to_write = content_lines
+            # Use the content as-is. The path hint is for targeting the file,
+            # not for modifying its content.
+
+        # Case 2: No path hint, check for embedded path in the first line.
+        else:
+            path_match = PATH_EXTRACT_REGEX.search(first_line)
+            if path_match:
+                extracted_path = path_match.group("path").strip()
+                if extracted_path:
+                    file_path = extracted_path
+                    # Content is used as-is, as it already contains the header.
 
         if not file_path:
             continue
 
-        yield file_path, lines_to_write
+        yield file_path, content_lines
