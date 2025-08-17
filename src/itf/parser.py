@@ -1,7 +1,7 @@
 # src/itf/parser.py
 import os
 import re
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 
 def _get_comment_format(file_path: str) -> Tuple[str, str]:
@@ -53,18 +53,52 @@ def _get_comment_format(file_path: str) -> Tuple[str, str]:
     return syntax_map.get(ext, ("//", ""))
 
 
-# Regex to find an optional file path hint followed by a markdown code block.
+# Regex to find a markdown code block and the line preceding it, which may
+# contain a path hint. It supports various markdown styles for the hint and
+# allows for an optional empty line between the hint and the code block.
 BLOCK_WITH_OPTIONAL_HINT_REGEX = re.compile(
-    r"(?:^.*?`(?P<path_hint>[^`\n]+)`.*\n)?"  # Optional: `path/hint` on a line
+    # Optional: A "hint line" that isn't a code fence, possibly followed by a blank line.
+    r"(?:^(?![`]{3,})(?P<hint_line>[^\n]*)\n(?:\s*\n)?)?"
     r"^[`]{3,}(?P<lang>[a-z]*)\s*\n"  # Start of code block
-    # Content: everything until a new fence is found or EOF.
-    # The negative lookahead `(?!^`{3,})` prevents matching across block boundaries.
+    # Content: everything until the next code fence or end of file.
     r"(?P<content>((?:(?!^`{3,})[\s\S])*))",
     re.MULTILINE,
 )
 
 # Regex to extract a file path from a comment on the first line of content.
 PATH_EXTRACT_REGEX = re.compile(r"^(?:#|//|/\*)\s*(?P<path>.*?)\s*(?:\*/)?$")
+
+
+def _extract_path_from_hint(hint_line: Optional[str]) -> Optional[str]:
+    """
+    Extracts a file path from a hint line by stripping common markdown syntax.
+
+    It prioritizes paths in backticks, then falls back to cleaning the line
+    of headers and bold markers to find a single path-like token.
+    Example: `**`path/to/file.py`**` -> `path/to/file.py`
+    """
+    if not hint_line:
+        return None
+
+    hint = hint_line.strip()
+
+    match = re.search(r"`([^`\n]+)`", hint)
+    if match:
+        path_candidate = match.group(1).strip()
+        if " " not in path_candidate and path_candidate:
+            return path_candidate
+
+    cleaned_hint = re.sub(r"^#+\s*", "", hint).strip()
+    if cleaned_hint.startswith("**") and cleaned_hint.endswith("**") and len(cleaned_hint) > 4:
+        cleaned_hint = cleaned_hint[2:-2]
+    elif cleaned_hint.startswith("*") and cleaned_hint.endswith("*") and len(cleaned_hint) > 2:
+        cleaned_hint = cleaned_hint[1:-1]
+
+    cleaned_hint = cleaned_hint.strip()
+    if " " not in cleaned_hint and cleaned_hint:
+        return cleaned_hint
+
+    return None
 
 
 def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
@@ -89,8 +123,9 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
         if match.group("lang") == "diff":
             continue
 
-        path_hint = match.group("path_hint")
+        hint_line = match.group("hint_line")
         content = match.group("content")
+        path_hint = _extract_path_from_hint(hint_line)
 
         # rstrip to prevent a trailing newline in the block from creating
         # an extra empty line at the end. Then split into lines.
@@ -116,13 +151,10 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
 
         # Case 2: No embedded path, but a path hint was found before the block.
         elif path_hint:
-            hinted_path = path_hint.strip()
-            if hinted_path:
-                file_path = hinted_path
-                # Prepend the file path as a commented header.
-                prefix, suffix = _get_comment_format(file_path)
-                header = f"{prefix} {file_path} {suffix}".strip()
-                lines_to_write = [header] + content_lines
+            file_path = path_hint
+            # Use the content as-is, without adding a new header. The path hint is
+            # only for targeting the file, not for modifying its content.
+            lines_to_write = content_lines
 
         if not file_path:
             continue
