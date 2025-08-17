@@ -56,10 +56,11 @@ def _get_comment_format(file_path: str) -> Tuple[str, str]:
 # Regex to find an optional file path hint followed by a markdown code block.
 BLOCK_WITH_OPTIONAL_HINT_REGEX = re.compile(
     r"(?:^.*?`(?P<path_hint>[^`\n]+)`.*\n)?"  # Optional: `path/hint` on a line
-    r"^[`]{3,}(?P<lang>[a-z]*)\s*\n"  # Start of code block: 3+ backticks, optional lang
-    r"(?P<content>.*?)\n"  # Content
-    r"^[`]{3,}",  # End of code block: 3+ backticks
-    re.DOTALL | re.MULTILINE,
+    r"^[`]{3,}(?P<lang>[a-z]*)\s*\n"  # Start of code block
+    # Content: everything until a new fence is found or EOF.
+    # The negative lookahead `(?!^`{3,})` prevents matching across block boundaries.
+    r"(?P<content>((?:(?!^`{3,})[\s\S])*))",
+    re.MULTILINE,
 )
 
 # Regex to extract a file path from a comment on the first line of content.

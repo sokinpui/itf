@@ -11,7 +11,11 @@ from .printer import print_error, print_info, print_success, print_warning
 
 # Regex to find a complete markdown-style diff block.
 DIFF_BLOCK_REGEX = re.compile(
-    r"^[`]{3,}\s*diff\s*\n(.*?)\n^[`]{3,}", re.DOTALL | re.MULTILINE
+    r"^[`]{3,}\s*diff\s*\n"  # Start of diff block
+    # Content: everything until a new fence is found or EOF.
+    # The negative lookahead `(?!^`{3,})` prevents matching across block boundaries.
+    r"((?:(?!^`{3,})[\s\S])*)",
+    re.MULTILINE,
 )
 
 
