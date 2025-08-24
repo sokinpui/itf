@@ -43,6 +43,13 @@ def main():
         metavar="DIR",
         help="One or more directories to search for files. New files are created in the first directory.",
     )
+    parser.add_argument(
+        "-e",
+        "--extension",
+        nargs="+",
+        metavar="EXT",
+        help="Filter to process only files with the specified extensions (e.g., 'py', 'js').",
+    )
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(

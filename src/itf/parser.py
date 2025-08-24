@@ -102,7 +102,9 @@ def _extract_path_from_hint(hint_line: Optional[str]) -> Optional[str]:
     return None
 
 
-def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
+def parse_file_blocks(
+    source_content: str, extensions: Optional[List[str]] = None
+) -> Iterator[Tuple[str, List[str]]]:
     """
     Parses content for file blocks and yields file paths and their content.
 
@@ -114,6 +116,7 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
 
     Args:
         source_content: The string content to parse.
+        extensions: An optional list of file extensions to filter by (e.g., ['.py', '.js']).
 
     Yields:
         A tuple containing the extracted file path and a list of content lines.
@@ -156,6 +159,9 @@ def parse_file_blocks(source_content: str) -> Iterator[Tuple[str, List[str]]]:
                     # Content is used as-is, as it already contains the header.
 
         if not file_path:
+            continue
+
+        if extensions and os.path.splitext(file_path)[1] not in extensions:
             continue
 
         yield file_path, content_lines

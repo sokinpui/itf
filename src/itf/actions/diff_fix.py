@@ -1,4 +1,5 @@
 # src/itf/actions/diff_fix.py
+import os
 import sys
 
 from ..diff_corrector import correct_diff
@@ -12,6 +13,11 @@ class DiffFixAction(Action):
     def __init__(self, args, path_resolver: PathResolver):
         super().__init__(args)
         self.path_resolver = path_resolver
+        self.extensions = (
+            [f".{ext.lstrip('.')}" for ext in args.extension]
+            if args.extension
+            else None
+        )
 
     def execute(self) -> None:
         source_provider = SourceProvider(self.args)
@@ -30,6 +36,9 @@ class DiffFixAction(Action):
                 continue
 
             file_path = path_match.group("path").strip()
+            if self.extensions and os.path.splitext(file_path)[1] not in self.extensions:
+                continue
+
             abs_file_path = self.path_resolver.resolve_existing(file_path)
 
             source_lines = []

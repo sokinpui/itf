@@ -9,7 +9,7 @@ class BlockAction(ContentProcessingAction):
     def _plan_changes(
         self, content: str
     ) -> Tuple[List[Tuple[str, List[str]]], Dict[str, str], Set[str]]:
-        file_blocks_rel = list(parse_file_blocks(content))
+        file_blocks_rel = list(parse_file_blocks(content, self.extensions))
         if not file_blocks_rel:
             return [], {}, set()
 

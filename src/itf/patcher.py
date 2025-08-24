@@ -3,7 +3,7 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from .diff_corrector import correct_diff
 from .path_resolver import PathResolver
@@ -23,7 +23,9 @@ DIFF_BLOCK_REGEX = re.compile(
 FILE_PATH_REGEX = re.compile(r"^\+\+\+ b/(?P<path>.*?)(\s|$)", re.MULTILINE)
 
 
-def extract_target_paths(source_content: str) -> Iterator[str]:
+def extract_target_paths(
+    source_content: str, extensions: Optional[List[str]] = None
+) -> Iterator[str]:
     """
     Parses content for diff blocks and yields the target file paths without
     applying any changes.
@@ -32,11 +34,16 @@ def extract_target_paths(source_content: str) -> Iterator[str]:
         patch_content = match.group(1)
         path_match = FILE_PATH_REGEX.search(patch_content)
         if path_match:
-            yield path_match.group("path").strip()
+            file_path = path_match.group("path").strip()
+            if extensions and os.path.splitext(file_path)[1] not in extensions:
+                continue
+            yield file_path
 
 
 def generate_patched_contents(
-    source_content: str, path_resolver: PathResolver
+    source_content: str,
+    path_resolver: PathResolver,
+    extensions: Optional[List[str]] = None,
 ) -> Iterator[Tuple[str, List[str]]]:
     """
     Finds diff blocks, corrects them, and yields the patched content.
@@ -69,6 +76,9 @@ def generate_patched_contents(
             continue
 
         file_path = path_match.group("path").strip()
+        if extensions and os.path.splitext(file_path)[1] not in extensions:
+            continue
+
         resolved_source_path = path_resolver.resolve_existing(file_path)
 
         source_lines = []

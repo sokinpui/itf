@@ -19,7 +19,9 @@ class DiffAction(ContentProcessingAction):
             )
             sys.exit(1)
 
-        file_blocks = list(generate_patched_contents(content, self.path_resolver))
+        file_blocks = list(
+            generate_patched_contents(content, self.path_resolver, self.extensions)
+        )
         if not file_blocks:
             return [], {}, set()
 

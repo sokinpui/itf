@@ -18,8 +18,8 @@ class AutoAction(ContentProcessingAction):
             print_error("`patch` command not found. It is required for --auto mode.")
             sys.exit(1)
 
-        diff_paths_rel = list(extract_target_paths(content))
-        block_blocks_rel = list(parse_file_blocks(content))
+        diff_paths_rel = list(extract_target_paths(content, self.extensions))
+        block_blocks_rel = list(parse_file_blocks(content, self.extensions))
         block_paths_rel = [fp for fp, _ in block_blocks_rel]
 
         all_paths_rel = diff_paths_rel + block_paths_rel
@@ -30,7 +30,9 @@ class AutoAction(ContentProcessingAction):
         file_actions, dirs_to_create = self._get_file_actions_and_dirs(all_paths_abs)
 
         print_info("\nGenerating patched content from diffs...")
-        diff_blocks = list(generate_patched_contents(content, self.path_resolver))
+        diff_blocks = list(
+            generate_patched_contents(content, self.path_resolver, self.extensions)
+        )
         block_blocks = [
             (self.path_resolver.resolve(fp), c) for fp, c in block_blocks_rel
         ]

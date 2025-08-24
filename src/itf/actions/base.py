@@ -37,6 +37,11 @@ class ContentProcessingAction(Action):
         super().__init__(args)
         self.state_manager = state_manager
         self.path_resolver = path_resolver
+        self.extensions = (
+            [f".{ext.lstrip('.')}" for ext in args.extension]
+            if args.extension
+            else None
+        )
 
     def execute(self) -> None:
         source_provider = SourceProvider(self.args)
