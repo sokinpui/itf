@@ -66,9 +66,6 @@ BLOCK_WITH_OPTIONAL_HINT_REGEX = re.compile(
     re.MULTILINE,
 )
 
-# Regex to extract a file path from a comment on the first line of content.
-PATH_EXTRACT_REGEX = re.compile(r"^(?:#|//|/\*)\s*(?P<path>.*?)\s*(?:\*/)?$")
-
 
 def _extract_path_from_hint(hint_line: Optional[str]) -> Optional[str]:
     """
@@ -108,11 +105,9 @@ def parse_file_blocks(
     """
     Parses content for file blocks and yields file paths and their content.
 
-    It handles two ways of specifying a file path:
-    1. A path on its own line (often in backticks) just before the code block (preferred).
-    2. An explicit path in a comment on the first line of the code block.
-
-    If a path is specified in both places, the one outside the block is used.
+    A valid file block is defined as a path hint on its own line, immediately
+    followed by a markdown code block. Code blocks without a preceding path
+    hint are ignored.
 
     Args:
         source_content: The string content to parse.
@@ -128,9 +123,16 @@ def parse_file_blocks(
             continue
 
         hint_line = match.group("hint_line")
-        content = match.group("content")
-        path_hint = _extract_path_from_hint(hint_line)
+        file_path = _extract_path_from_hint(hint_line)
 
+        # A file block is only valid if it has a path hint.
+        if not file_path:
+            continue
+
+        if extensions and os.path.splitext(file_path)[1] not in extensions:
+            continue
+
+        content = match.group("content")
         # rstrip to prevent a trailing newline in the block from creating
         # an extra empty line at the end. Then split into lines.
         content_lines = content.rstrip("\n").split("\n")
@@ -138,30 +140,5 @@ def parse_file_blocks(
         # If the block was empty or just whitespace, treat as empty list.
         if content_lines == [""]:
             content_lines = []
-
-        first_line = content_lines[0].strip() if content_lines else ""
-
-        file_path = None
-
-        # Case 1: Path hint was found before the block. This takes precedence.
-        if path_hint:
-            file_path = path_hint
-            # Use the content as-is. The path hint is for targeting the file,
-            # not for modifying its content.
-
-        # Case 2: No path hint, check for embedded path in the first line.
-        else:
-            path_match = PATH_EXTRACT_REGEX.search(first_line)
-            if path_match:
-                extracted_path = path_match.group("path").strip()
-                if extracted_path:
-                    file_path = extracted_path
-                    # Content is used as-is, as it already contains the header.
-
-        if not file_path:
-            continue
-
-        if extensions and os.path.splitext(file_path)[1] not in extensions:
-            continue
 
         yield file_path, content_lines
