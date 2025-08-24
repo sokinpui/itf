@@ -157,7 +157,7 @@ class NeovimManager:
                 )
                 self.nvim.command(f"edit {escaped_path}")
                 target_buf = self.nvim.api.get_current_buf()
-            
+
             # Ensure we are operating on the correct buffer
             self.nvim.api.set_current_buf(target_buf)
             self.nvim.api.buf_set_lines(target_buf, 0, -1, True, content_lines)
@@ -190,9 +190,11 @@ class NeovimManager:
             raise ConnectionError("Not connected to any Neovim instance.")
 
         abs_file_path = os.path.abspath(file_path)
-        if not os.path.exists(abs_file_path) and action == 'modify':
-             print_warning(f"\nFile '{file_path}' does not exist. Cannot revert modification.")
-             return False # Or True if we consider it a "successful" no-op revert
+        if not os.path.exists(abs_file_path) and action == "modify":
+            print_warning(
+                f"\nFile '{file_path}' does not exist. Cannot revert modification."
+            )
+            return False  # Or True if we consider it a "successful" no-op revert
 
         try:
             escaped_path = self.nvim.api.call_function("fnameescape", [abs_file_path])
@@ -212,9 +214,11 @@ class NeovimManager:
                     try:
                         os.remove(abs_file_path)
                     except FileNotFoundError:
-                        pass # File already gone, which is fine.
+                        pass  # File already gone, which is fine.
                     except OSError as e:
-                        print_error(f"\nFailed to delete reverted file '{file_path}': {e}")
+                        print_error(
+                            f"\nFailed to delete reverted file '{file_path}': {e}"
+                        )
                         return False
                     return True
 
@@ -225,3 +229,24 @@ class NeovimManager:
             print_error(f"\nError reverting '{file_path}': {e}")
             return False
 
+    def redo_file(self, file_path: str, action: str) -> bool:
+        """
+        Opens a file, applies one redo operation, and saves it.
+        """
+        if not self.nvim:
+            raise ConnectionError("Not connected to any Neovim instance.")
+
+        abs_file_path = os.path.abspath(file_path)
+
+        try:
+            escaped_path = self.nvim.api.call_function("fnameescape", [abs_file_path])
+            # Open the file, discarding any unsaved changes in the buffer.
+            # This is crucial to ensure we are redoing relative to the on-disk state.
+            self.nvim.command(f"edit! {escaped_path}")
+
+            self.nvim.command("redo")
+            self.nvim.command("write")
+            return True
+        except pynvim.NvimError as e:
+            print_error(f"\nError redoing '{file_path}': {e}")
+            return False

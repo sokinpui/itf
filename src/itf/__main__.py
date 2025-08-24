@@ -31,12 +31,6 @@ def main():
         help="Corrects diffs from input and prints them to stdout. Overrides other actions.",
     )
     parser.add_argument(
-        "-r",
-        "--revert",
-        action="store_true",
-        help="Revert the last change made with -s/--save.",
-    )
-    parser.add_argument(
         "-l",
         "--lookup-dir",
         nargs="+",
@@ -49,6 +43,14 @@ def main():
         nargs="+",
         metavar="EXT",
         help="Filter to process only files with the specified extensions (e.g., 'py', 'js').",
+    )
+
+    history_group = parser.add_mutually_exclusive_group()
+    history_group.add_argument(
+        "-r", "--revert", action="store_true", help="Revert the last operation."
+    )
+    history_group.add_argument(
+        "-R", "--redo", action="store_true", help="Redo the last reverted operation."
     )
 
     mode_group = parser.add_mutually_exclusive_group()

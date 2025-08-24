@@ -1,8 +1,14 @@
 # src/itf/app.py
 import argparse
 import sys
-
-from .actions import AutoAction, BlockAction, DiffAction, DiffFixAction, RevertAction
+from .actions import (
+    AutoAction,
+    BlockAction,
+    DiffAction,
+    DiffFixAction,
+    RedoAction,
+    RevertAction,
+)
 from .actions.base import Action
 from .path_resolver import PathResolver
 from .printer import print_warning
@@ -27,6 +33,8 @@ class ItfApp:
     def _create_action(self) -> Action | None:
         if self.args.revert:
             return RevertAction(self.args, self.state_manager)
+        if self.args.redo:
+            return RedoAction(self.args, self.state_manager)
         if self.args.output_diff_fix:
             return DiffFixAction(self.args, self.path_resolver)
         if self.args.auto:
