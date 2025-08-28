@@ -16,7 +16,7 @@ def main():
         "-s",
         "--save",
         action="store_true",
-        help="Save all modified buffers in Neovim after the update. Required to enable -r/--revert.",
+        help="Save all modified buffers in Neovim after the update.",
     )
     parser.add_argument(
         "-c",
@@ -28,14 +28,14 @@ def main():
         "-o",
         "--output-diff-fix",
         action="store_true",
-        help="Corrects diffs from input and prints them to stdout. Overrides other actions.",
+        help="print the diff that corrected start and count",
     )
     parser.add_argument(
         "-l",
         "--lookup-dir",
         nargs="+",
         metavar="DIR",
-        help="One or more directories to search for files. New files are created in the first directory.",
+        help="change directory to look for files (default: current directory).",
     )
     parser.add_argument(
         "-e",
@@ -47,10 +47,16 @@ def main():
 
     history_group = parser.add_mutually_exclusive_group()
     history_group.add_argument(
-        "-r", "--revert", action="store_true", help="Revert the last operation."
+        "-r",
+        "--revert",
+        action="store_true",
+        help="Revert the last operation. support undo tree, multiple levels of undo",
     )
     history_group.add_argument(
-        "-R", "--redo", action="store_true", help="Redo the last reverted operation."
+        "-R",
+        "--redo",
+        action="store_true",
+        help="Redo the last reverted operation, support redo tree, multiple levels of redo",
     )
 
     mode_group = parser.add_mutually_exclusive_group()
@@ -58,19 +64,19 @@ def main():
         "-f",
         "--file",
         action="store_true",
-        help="Parse content as full file blocks only, ignoring diffs (default behavior).",
+        help="ignore diff blocks, parse content files blocks only.",
     )
     mode_group.add_argument(
         "-d",
         "--diff",
         action="store_true",
-        help="Parse content as diffs only and apply them as patches.",
+        help="parse only diff blocks, ignore content file blocks.",
     )
     mode_group.add_argument(
         "-a",
         "--auto",
         action="store_true",
-        help="Smart mode. Process both file blocks and diffs.",
+        help="parse both diff blocks and content file blocks.",
     )
 
     args = parser.parse_args()
