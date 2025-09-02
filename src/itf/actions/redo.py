@@ -11,7 +11,6 @@ from ..printer import (
     print_path,
     print_success,
     print_warning,
-    prompt_user,
 )
 from ..state_manager import StateManager
 from .base import Action
@@ -33,17 +32,6 @@ class RedoAction(Action):
         )
         for op in ops_to_redo:
             print_path(f"- {op['path']} (action: {op['action']})")
-
-        try:
-            response = prompt_user(
-                "Do you want to redo these changes? (y/N):"
-            ).lower()
-            if response != "y":
-                print_warning("Redo operation declined. Exiting.")
-                return
-        except (EOFError, KeyboardInterrupt):
-            print_warning("\nOperation cancelled by user. Exiting.")
-            sys.exit(0)
 
         redone_files, failed_files = [], []
         with NeovimManager() as manager:
