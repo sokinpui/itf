@@ -29,8 +29,8 @@ The project is organized into several packages:
 
 2.  **Clone the repository**:
     ```bash
-    git clone https://github.com/sokinpui/itf.go.git
-    cd itf.go
+    git clone https://github.com/sokinpui/itf.git
+    cd itf
     ```
 
 3.  **Install dependencies**:

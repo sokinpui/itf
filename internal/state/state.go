@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sokinpui/itf.go/internal/fs"
-	"github.com/sokinpui/itf.go/model"
+	"github.com/sokinpui/itf/internal/fs"
+	"github.com/sokinpui/itf/model"
 )
 
 const (

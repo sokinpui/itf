@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sokinpui/itf.go/cli"
+	"github.com/sokinpui/itf/cli"
 )
 
 func main() {

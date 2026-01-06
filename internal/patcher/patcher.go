@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sokinpui/itf.go/internal/fs"
-	"github.com/sokinpui/itf.go/model"
+	"github.com/sokinpui/itf/internal/fs"
+	"github.com/sokinpui/itf/model"
 )
 
 // filePathRegex extracts the file path from a '+++ b/...' line.

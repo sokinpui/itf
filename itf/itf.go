@@ -7,13 +7,13 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/sokinpui/itf.go/internal/fs"
-	"github.com/sokinpui/itf.go/internal/nvim"
-	"github.com/sokinpui/itf.go/internal/parser"
-	"github.com/sokinpui/itf.go/internal/patcher"
-	"github.com/sokinpui/itf.go/internal/source"
-	"github.com/sokinpui/itf.go/internal/state"
-	"github.com/sokinpui/itf.go/model"
+	"github.com/sokinpui/itf/internal/fs"
+	"github.com/sokinpui/itf/internal/nvim"
+	"github.com/sokinpui/itf/internal/parser"
+	"github.com/sokinpui/itf/internal/patcher"
+	"github.com/sokinpui/itf/internal/source"
+	"github.com/sokinpui/itf/internal/state"
+	"github.com/sokinpui/itf/model"
 )
 
 // Config holds the core application configuration.

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sokinpui/itf.go/internal/tui"
-	"github.com/sokinpui/itf.go/itf"
+	"github.com/sokinpui/itf/internal/tui"
+	"github.com/sokinpui/itf/itf"
 	"github.com/spf13/cobra"
 )
 

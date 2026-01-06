@@ -21,7 +21,7 @@ It can create new files, modify existing ones using code blocks, or apply change
 You can install `itf` using `go install`:
 
 ```bash
-go install github.com/sokinpui/itf.go/cmd/itf@latest
+go install github.com/sokinpui/itf/cmd/itf@latest
 ```
 
 ## Basic Usage

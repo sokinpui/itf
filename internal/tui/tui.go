@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sokinpui/itf.go/itf"
-	"github.com/sokinpui/itf.go/model"
+	"github.com/sokinpui/itf/itf"
+	"github.com/sokinpui/itf/model"
 )
 
 // --- Styles ---
