@@ -1,0 +1,44 @@
+package itf
+
+import (
+	"fmt"
+)
+
+// Apply parses the given content string and applies the changes to files.
+// It returns a summary of the operations in a map.
+func Apply(content string, config Config) (map[string][]string, error) {
+	app, err := New(&config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize itf app: %w", err)
+	}
+
+	summary, err := app.processAndApply(content)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string][]string{
+		"Created":  summary.Created,
+		"Modified": summary.Modified,
+		"Renamed":  summary.Renamed,
+		"Deleted":  summary.Deleted,
+		"Failed":   summary.Failed,
+	}
+
+	return result, nil
+}
+
+func GetToolCall(content string, config Config) (string, error) {
+	app, err := New(&config)
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize itf app: %w", err)
+	}
+
+	toolCalls, err := app.GetToolCalls(content)
+	if err != nil {
+		return "", err
+	}
+
+	return toolCalls, nil
+
+}

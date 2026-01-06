@@ -1,0 +1,314 @@
+package parser
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/sokinpui/itf.go/internal/fs"
+	"github.com/sokinpui/itf.go/internal/patcher"
+	"github.com/sokinpui/itf.go/model"
+)
+
+// ExecutionPlan contains all the changes and setup needed for an operation.
+type ExecutionPlan struct {
+	Changes      []model.FileChange
+	Deletes      []string
+	Renames      []model.FileRename
+	FileActions  map[string]string // Maps absolute path to "create" or "modify"
+	DirsToCreate map[string]struct{}
+	Failed       []string // Files that failed during planning (e.g., bad patch)
+}
+
+var (
+	// pathInHintRegex extracts a path from a hint line, e.g., `path/to/file.go`.
+	pathInHintRegex = regexp.MustCompile("^`([^`\n]+)`")
+)
+
+// CreatePlan parses content and generates a plan of file changes.
+func CreatePlan(content string, resolver *fs.PathResolver, extensions []string, files []string) (*ExecutionPlan, error) {
+	allowedFiles := make(map[string]struct{})
+	if len(files) > 0 {
+		for _, f := range files {
+			allowedFiles[resolver.Resolve(f)] = struct{}{}
+		}
+	}
+
+	allBlocks, err := ExtractCodeBlocks([]byte(content))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse markdown content: %w", err)
+	}
+
+	// If '.diff' is the ONLY extension, we are in a special diff-only mode.
+	isDiffOnlyMode := len(extensions) == 1 && extensions[0] == ".diff"
+
+	var fileBlocks []model.FileChange
+	if !isDiffOnlyMode {
+		fileBlocks = parseFileBlocks(allBlocks, resolver, extensions, allowedFiles)
+	}
+
+	diffBlocks := extractDiffBlocksFromParsed(allBlocks, resolver, allowedFiles)
+	deletePaths := parseDeletePaths(allBlocks, resolver, allowedFiles)
+	renames := parseRenameBlocks(allBlocks, resolver, allowedFiles)
+
+	patcherExtensions := extensions
+	if isDiffOnlyMode {
+		// In diff-only mode, don't filter patches by extension.
+		patcherExtensions = []string{}
+	}
+	patchedChanges, failedPatches, err := patcher.GeneratePatchedContents(diffBlocks, resolver, patcherExtensions)
+	if err != nil {
+		return nil, fmt.Errorf("failed during patch generation: %w", err)
+	}
+
+	// Combine changes, letting file blocks overwrite diff patches for the same file.
+	finalChanges := make(map[string]model.FileChange)
+	for _, change := range patchedChanges {
+		finalChanges[change.Path] = change
+	}
+	for _, block := range fileBlocks {
+		finalChanges[block.Path] = block
+	}
+
+	// Filter out changes for files that are marked for deletion.
+	deleteAndRenameSet := make(map[string]struct{})
+	for _, path := range deletePaths {
+		deleteAndRenameSet[path] = struct{}{}
+	}
+	for _, rename := range renames {
+		deleteAndRenameSet[rename.OldPath] = struct{}{}
+	}
+	for path := range finalChanges {
+		if _, found := deleteAndRenameSet[path]; found {
+			delete(finalChanges, path)
+		}
+	}
+
+	// Convert map to slice for ordered processing.
+	planChanges := make([]model.FileChange, 0, len(finalChanges))
+	targetPaths := make([]string, 0, len(finalChanges))
+	for _, change := range finalChanges {
+		planChanges = append(planChanges, change)
+		targetPaths = append(targetPaths, change.Path)
+	}
+
+	actions, dirs := fs.GetFileActionsAndDirs(targetPaths)
+	for _, path := range deletePaths {
+		actions[path] = "delete"
+	}
+	for _, rename := range renames {
+		actions[rename.OldPath] = "rename"
+		dir := filepath.Dir(rename.NewPath)
+		if dir != "." && dir != "/" {
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				dirs[dir] = struct{}{}
+			}
+		}
+	}
+	return &ExecutionPlan{
+		Changes:      planChanges,
+		Deletes:      deletePaths,
+		Renames:      renames,
+		FileActions:  actions,
+		DirsToCreate: dirs,
+		Failed:       failedPatches,
+	}, nil
+}
+
+func parseFileBlocks(allBlocks []CodeBlock, resolver *fs.PathResolver, extensions []string, allowedFiles map[string]struct{}) []model.FileChange {
+	var blocks []model.FileChange
+
+	for _, block := range allBlocks {
+		if block.Lang == "diff" || block.Lang == "tool" || block.Lang == "delete" || block.Lang == "rename" {
+			continue // Diffs are handled separately.
+		}
+
+		filePath := ExtractPathFromHint(block.Hint)
+		if filePath == "" {
+			continue
+		}
+
+		absPath := resolver.Resolve(filePath)
+		if len(allowedFiles) > 0 {
+			if _, ok := allowedFiles[absPath]; !ok {
+				continue
+			}
+		}
+
+		if !HasAllowedExtension(filePath, extensions) {
+			continue
+		}
+
+		trimmedContent := strings.TrimRight(block.Content, "\n")
+		lines := strings.Split(trimmedContent, "\n")
+		// Handle empty blocks correctly.
+		if len(lines) == 1 && lines[0] == "" {
+			lines = []string{}
+		}
+
+		blocks = append(blocks, model.FileChange{
+			Path:     absPath,
+			Content:  lines,
+			Source:   "codeblock",
+			RawBlock: fmt.Sprintf("```%s\n%s\n```", block.Lang, trimmedContent),
+		})
+	}
+	return blocks
+}
+
+// ExtractDiffBlocks finds all diff blocks in the content.
+func ExtractDiffBlocks(content string, resolver *fs.PathResolver, files []string) []model.DiffBlock {
+	allBlocks, err := ExtractCodeBlocks([]byte(content))
+	if err != nil {
+		// This function is also used for non-critical paths like --output-diff-fix,
+		// so we just return nil. The error isn't critical here.
+		return nil
+	}
+
+	allowedFiles := make(map[string]struct{})
+	if len(files) > 0 {
+		for _, f := range files {
+			allowedFiles[resolver.Resolve(f)] = struct{}{}
+		}
+	}
+
+	return extractDiffBlocksFromParsed(allBlocks, resolver, allowedFiles)
+}
+
+// extractDiffBlocksFromParsed is a helper to process already-parsed blocks.
+func extractDiffBlocksFromParsed(allBlocks []CodeBlock, resolver *fs.PathResolver, allowedFiles map[string]struct{}) []model.DiffBlock {
+	var diffs []model.DiffBlock
+
+	for _, block := range allBlocks {
+		if block.Lang != "diff" {
+			continue
+		}
+
+		rawContent := strings.Trim(block.Content, "\n")
+		filePath := patcher.ExtractPathFromDiff(rawContent)
+		if filePath == "" {
+			// Silently skip blocks without a path.
+			continue
+		}
+
+		if len(allowedFiles) > 0 {
+			absPath := resolver.Resolve(filePath)
+			if _, ok := allowedFiles[absPath]; !ok {
+				continue
+			}
+		}
+
+		diffs = append(diffs, model.DiffBlock{
+			FilePath:   filePath,
+			RawContent: rawContent,
+		})
+	}
+	return diffs
+}
+
+// ExtractToolBlocks finds all tool blocks in the content.
+func ExtractToolBlocks(content string) ([]model.ToolBlock, error) {
+	allBlocks, err := ExtractCodeBlocks([]byte(content))
+	if err != nil {
+		return nil, err
+	}
+	var tools []model.ToolBlock
+	for _, block := range allBlocks {
+		if block.Lang == "tool" {
+			tools = append(tools, model.ToolBlock{
+				Content: strings.TrimSpace(block.Content),
+			})
+		}
+	}
+	return tools, nil
+}
+
+func ExtractPathFromHint(hint string) string {
+	hint = strings.TrimSpace(hint)
+
+	// A path hint must be enclosed in backticks, e.g., `path/to/file.go`
+	if match := pathInHintRegex.FindStringSubmatch(hint); len(match) > 1 {
+		path := strings.TrimSpace(match[1])
+		// Disallow spaces to avoid capturing commands like `go run main.go` as a path.
+		if !strings.Contains(path, " ") {
+			return path
+		}
+	}
+
+	return ""
+}
+
+func HasAllowedExtension(path string, extensions []string) bool {
+	if len(extensions) == 0 {
+		return true
+	}
+	ext := filepath.Ext(path)
+	for _, allowedExt := range extensions {
+		if ext == allowedExt {
+			return true
+		}
+	}
+	return false
+}
+
+func parseDeletePaths(allBlocks []CodeBlock, resolver *fs.PathResolver, allowedFiles map[string]struct{}) []string {
+	var paths []string
+	for _, block := range allBlocks {
+		if block.Lang != "delete" {
+			continue
+		}
+		lines := strings.Split(block.Content, "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				absPath := resolver.Resolve(trimmed)
+				if len(allowedFiles) > 0 {
+					if _, ok := allowedFiles[absPath]; !ok {
+						continue
+					}
+				}
+				paths = append(paths, absPath)
+			}
+		}
+	}
+	return paths
+}
+
+func parseRenameBlocks(allBlocks []CodeBlock, resolver *fs.PathResolver, allowedFiles map[string]struct{}) []model.FileRename {
+	var renames []model.FileRename
+	for _, block := range allBlocks {
+		if block.Lang != "rename" {
+			continue
+		}
+		lines := strings.Split(block.Content, "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			parts := strings.Fields(trimmed)
+			if len(parts) != 2 {
+				continue
+			}
+
+			oldPath := resolver.Resolve(parts[0])
+			newPath := resolver.Resolve(parts[1])
+
+			if len(allowedFiles) > 0 {
+				_, oldOk := allowedFiles[oldPath]
+				_, newOk := allowedFiles[newPath]
+				if !oldOk && !newOk {
+					continue
+				}
+			}
+
+			renames = append(renames, model.FileRename{
+				OldPath: oldPath,
+				NewPath: newPath,
+			})
+		}
+	}
+	return renames
+}
