@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sokinpui/itf/cli"
+	"github.com/sokinpui/itf"
 )
 
 func main() {
-	if err := cli.Execute(); err != nil {
+	if err := itf.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

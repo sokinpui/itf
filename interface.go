@@ -2,12 +2,11 @@ package itf
 
 import (
 	"fmt"
+	"strings"
 )
 
-// Apply parses the given content string and applies the changes to files.
-// It returns a summary of the operations in a map.
 func Apply(content string, config Config) (map[string][]string, error) {
-	app, err := New(&config)
+	app, err := NewApp(&config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize itf app: %w", err)
 	}
@@ -17,28 +16,24 @@ func Apply(content string, config Config) (map[string][]string, error) {
 		return nil, err
 	}
 
-	result := map[string][]string{
+	return map[string][]string{
 		"Created":  summary.Created,
 		"Modified": summary.Modified,
 		"Renamed":  summary.Renamed,
 		"Deleted":  summary.Deleted,
 		"Failed":   summary.Failed,
-	}
-
-	return result, nil
+	}, nil
 }
 
 func GetToolCall(content string, config Config) (string, error) {
-	app, err := New(&config)
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize itf app: %w", err)
-	}
-
-	toolCalls, err := app.GetToolCalls(content)
+	tools, err := ExtractToolBlocks(content)
 	if err != nil {
 		return "", err
 	}
 
-	return toolCalls, nil
-
+	var contents []string
+	for _, t := range tools {
+		contents = append(contents, t.Content)
+	}
+	return strings.Join(contents, "\n"), nil
 }

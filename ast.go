@@ -1,4 +1,4 @@
-package parser
+package itf
 
 import (
 	"bytes"
@@ -9,18 +9,12 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// CodeBlock represents a parsed code block from markdown content.
 type CodeBlock struct {
-	// Hint is the content of the paragraph immediately preceding the code block.
-	Hint string
-	// Lang is the language identifier of the code block (e.g., "go", "diff").
-	Lang string
-	// Content is the raw text inside the code block.
+	Hint    string
+	Lang    string
 	Content string
 }
 
-// ExtractCodeBlocks uses a markdown AST to find all fenced code blocks
-// and their preceding paragraph, which is treated as a hint.
 func ExtractCodeBlocks(source []byte) ([]CodeBlock, error) {
 	var blocks []CodeBlock
 	parser := goldmark.DefaultParser()
