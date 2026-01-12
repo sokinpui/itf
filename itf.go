@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 )
 
 type Config struct {
@@ -130,10 +131,25 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		a.stateManager.Write(ops)
 	}
 
+	var created, modified []string
+	for _, p := range updated {
+		if plan.FileActions[p] == "create" {
+			created = append(created, p)
+		} else {
+			modified = append(modified, p)
+		}
+	}
+
+	var renamedPaths []string
+	for oldPath, newPath := range renamed {
+		renamedPaths = append(renamedPaths, fmt.Sprintf("%s -> %s", oldPath, newPath))
+	}
+
 	s := Summary{
-		Created:  updated, // Simplified categorization
+		Created:  created,
+		Modified: modified,
 		Deleted:  deleted,
-		Renamed:  failedRenames, // etc...
+		Renamed:  renamedPaths,
 		Failed:   append(failedNvim, append(failedDeletes, failedRenames...)...),
 	}
 	a.relativizeSummaryPaths(&s)
@@ -188,16 +204,28 @@ func (a *App) redoLastOperation() (Summary, error) {
 
 func (a *App) relativizeSummaryPaths(s *Summary) {
 	wd, _ := os.Getwd()
-	rel := func(paths []string) []string {
+	relPath := func(p string) string {
+		if r, err := filepath.Rel(wd, p); err == nil {
+			return r
+		}
+		return p
+	}
+
+	relList := func(paths []string) []string {
 		var res []string
 		for _, p := range paths {
-			if r, err := filepath.Rel(wd, p); err == nil {
-				res = append(res, r)
-				continue
+			if strings.Contains(p, " -> ") {
+				parts := strings.SplitN(p, " -> ", 2)
+				res = append(res, fmt.Sprintf("%s -> %s", relPath(parts[0]), relPath(parts[1])))
+			} else {
+				res = append(res, relPath(p))
 			}
-			res = append(res, p)
 		}
 		return res
 	}
-	s.Created, s.Modified, s.Deleted, s.Failed = rel(s.Created), rel(s.Modified), rel(s.Deleted), rel(s.Failed)
+	s.Created = relList(s.Created)
+	s.Modified = relList(s.Modified)
+	s.Deleted = relList(s.Deleted)
+	s.Renamed = relList(s.Renamed)
+	s.Failed = relList(s.Failed)
 }
