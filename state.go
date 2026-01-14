@@ -77,19 +77,24 @@ func (m *StateManager) load() error {
 	m.state = &State{CurrentIndex: idx, History: []HistoryEntry{}}
 
 	for _, b := range blocks[1:] {
-		lines := strings.Split(strings.TrimSpace(b), "\n")
-		if len(lines) == 0 {
+		content := strings.TrimSpace(b)
+		if content == "" {
 			continue
 		}
+
+		lines := strings.Split(content, "\n")
 		ts, _ := strconv.ParseInt(lines[0], 10, 64)
 		entry := HistoryEntry{Timestamp: ts}
-		for i := 1; i < len(lines); {
+
+		for i := 1; i+2 < len(lines); {
 			op := Operation{Action: lines[i], Path: lines[i+1], ContentHash: lines[i+2]}
 			i += 3
-			if op.Action == "rename" {
+
+			if op.Action == "rename" && i < len(lines) {
 				op.NewPath = lines[i]
 				i++
 			}
+
 			entry.Operations = append(entry.Operations, op)
 		}
 		m.state.History = append(m.state.History, entry)
