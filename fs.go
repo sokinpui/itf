@@ -94,9 +94,14 @@ func CreateDirs(dirs map[string]struct{}) error {
 }
 
 func TrashFile(path string, trashPath string, wd string) error {
-	relPath, err := filepath.Rel(wd, path)
+	absPath, err := filepath.Abs(path)
 	if err != nil {
-		relPath = filepath.Base(path)
+		return err
+	}
+
+	relPath, err := filepath.Rel(wd, absPath)
+	if err != nil {
+		relPath = filepath.Base(absPath)
 	}
 
 	destPath := filepath.Join(trashPath, relPath)
@@ -104,11 +109,16 @@ func TrashFile(path string, trashPath string, wd string) error {
 		return err
 	}
 
-	return os.Rename(path, destPath)
+	return os.Rename(absPath, destPath)
 }
 
 func RestoreFileFromTrash(originalPath string, trashPath string, wd string) error {
-	relPath, err := filepath.Rel(wd, originalPath)
+	absPath, err := filepath.Abs(originalPath)
+	if err != nil {
+		return err
+	}
+
+	relPath, err := filepath.Rel(wd, absPath)
 	if err != nil {
 		relPath = filepath.Base(originalPath)
 	}
@@ -118,5 +128,5 @@ func RestoreFileFromTrash(originalPath string, trashPath string, wd string) erro
 		return fmt.Errorf("file not found in trash: %s", srcPath)
 	}
 
-	return os.Rename(srcPath, originalPath)
+	return os.Rename(srcPath, absPath)
 }

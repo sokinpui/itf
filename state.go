@@ -153,18 +153,33 @@ func (m *StateManager) CreateOperations(updated []string, actions map[string]str
 		rm[r.OldPath] = r.NewPath
 	}
 
+	wd, _ := os.Getwd()
+
 	for _, f := range updated {
 		a := actions[f]
 		pfh, np := f, ""
+
 		if a == "delete" {
-			rel, _ := filepath.Rel(".", f)
+			rel, _ := filepath.Rel(wd, f)
 			pfh = filepath.Join(m.StateDir, TrashDir, rel)
 		} else if a == "rename" {
 			np = rm[f]
 			pfh = np
 		}
+
 		h, _ := GetFileSHA256(pfh)
-		ops = append(ops, Operation{Path: f, Action: a, ContentHash: h, NewPath: np})
+
+		relPath, err := filepath.Rel(wd, f)
+		if err != nil {
+			relPath = f
+		}
+
+		relNewPath, err := filepath.Rel(wd, np)
+		if err != nil || np == "" {
+			relNewPath = np
+		}
+
+		ops = append(ops, Operation{Path: relPath, Action: a, ContentHash: h, NewPath: relNewPath})
 	}
 	sort.Slice(ops, func(i, j int) bool { return ops[i].Path < ops[j].Path })
 	return ops

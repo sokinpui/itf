@@ -101,8 +101,9 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 
 	var deleted, failedDeletes []string
 	trash := filepath.Join(a.stateManager.StateDir, TrashDir)
+	wd, _ := os.Getwd()
 	for _, p := range plan.Deletes {
-		if TrashFile(p, trash, ".") == nil {
+		if TrashFile(p, trash, wd) == nil {
 			deleted = append(deleted, p)
 		} else {
 			failedDeletes = append(failedDeletes, p)
@@ -119,16 +120,21 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		}
 	}
 
-	updated, failedNvim := m.ApplyChanges(plan.Changes, func(c int) {
-		if a.progressCallback != nil {
-			a.progressCallback(c, len(plan.Changes))
-		}
-	})
+	updated, failedNvim := m.ApplyChanges(plan.Changes, a.progressCallback)
 
-	if !a.cfg.Buffer && len(updated)+len(deleted)+len(renamed) > 0 {
+	var successfulPaths []string
+	successfulPaths = append(successfulPaths, updated...)
+	successfulPaths = append(successfulPaths, deleted...)
+	for oldPath := range renamed {
+		successfulPaths = append(successfulPaths, oldPath)
+	}
+
+	if !a.cfg.Buffer && len(successfulPaths) > 0 {
 		m.SaveAllBuffers()
-		ops := a.stateManager.CreateOperations(append(updated, deleted...), plan.FileActions, plan.Renames)
-		a.stateManager.Write(ops)
+		ops := a.stateManager.CreateOperations(successfulPaths, plan.FileActions, plan.Renames)
+		if len(ops) > 0 {
+			a.stateManager.Write(ops)
+		}
 	}
 
 	var created, modified []string
@@ -182,8 +188,10 @@ func (a *App) undoLastOperation() (Summary, error) {
 		return Summary{Message: "No undo"}, nil
 	}
 	m, _ := NewNvimManager()
-	defer m.Close()
-	undone, failed := m.UndoFiles(ops, a.stateManager.StateDir, nil)
+	if m != nil {
+		defer m.Close()
+	}
+	undone, failed := m.UndoFiles(ops, a.stateManager.StateDir, a.progressCallback)
 	s := Summary{Modified: undone, Failed: failed, Message: "Undone"}
 	a.relativizeSummaryPaths(&s)
 	return s, nil
@@ -195,8 +203,10 @@ func (a *App) redoLastOperation() (Summary, error) {
 		return Summary{Message: "No redo"}, nil
 	}
 	m, _ := NewNvimManager()
-	defer m.Close()
-	redone, failed := m.RedoFiles(ops, a.stateManager.StateDir, nil)
+	if m != nil {
+		defer m.Close()
+	}
+	redone, failed := m.RedoFiles(ops, a.stateManager.StateDir, a.progressCallback)
 	s := Summary{Modified: redone, Failed: failed, Message: "Redone"}
 	a.relativizeSummaryPaths(&s)
 	return s, nil

@@ -80,7 +80,7 @@ func (m *NvimManager) Close() {
 	}
 }
 
-func (m *NvimManager) ApplyChanges(changes []FileChange, progressCb func(int)) (updated, failed []string) {
+func (m *NvimManager) ApplyChanges(changes []FileChange, progressCb ProgressUpdate) (updated, failed []string) {
 	for i, change := range changes {
 		if m.updateBuffer(change.Path, change.Content) {
 			updated = append(updated, change.Path)
@@ -88,7 +88,7 @@ func (m *NvimManager) ApplyChanges(changes []FileChange, progressCb func(int)) (
 			failed = append(failed, change.Path)
 		}
 		if progressCb != nil {
-			progressCb(i + 1)
+			progressCb(i+1, len(changes))
 		}
 	}
 	return updated, failed
@@ -116,7 +116,11 @@ func (m *NvimManager) SaveAllBuffers() {
 	m.v.Command("wa!")
 }
 
-func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb func(int)) (undone, failed []string) {
+func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb ProgressUpdate) (undone, failed []string) {
+	if m == nil {
+		return nil, nil
+	}
+
 	for i, op := range ops {
 		if m.undoFile(op, stateDir) {
 			undone = append(undone, op.Path)
@@ -124,15 +128,16 @@ func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb fun
 			failed = append(failed, op.Path)
 		}
 		if progressCb != nil {
-			progressCb(i + 1)
+			progressCb(i+1, len(ops))
 		}
 	}
 	return undone, failed
 }
 
 func (m *NvimManager) undoFile(op Operation, stateDir string) bool {
+	wd, _ := os.Getwd()
 	if op.Action == "delete" {
-		return RestoreFileFromTrash(op.Path, filepath.Join(stateDir, TrashDir), ".") == nil
+		return RestoreFileFromTrash(op.Path, filepath.Join(stateDir, TrashDir), wd) == nil
 	}
 
 	if op.Action == "rename" {
@@ -160,12 +165,17 @@ func (m *NvimManager) undoFile(op Operation, stateDir string) bool {
 	return b.Execute() == nil
 }
 
-func (m *NvimManager) RedoFiles(ops []Operation, stateDir string, progressCb func(int)) (redone, failed []string) {
+func (m *NvimManager) RedoFiles(ops []Operation, stateDir string, progressCb ProgressUpdate) (redone, failed []string) {
+	if m == nil {
+		return nil, nil
+	}
+
 	for i, op := range ops {
 		success := false
+		wd, _ := os.Getwd()
 		switch op.Action {
 		case "delete":
-			success = TrashFile(op.Path, filepath.Join(stateDir, TrashDir), ".") == nil
+			success = TrashFile(op.Path, filepath.Join(stateDir, TrashDir), wd) == nil
 		case "create", "modify":
 			success = m.redoBufferOp(op.Path)
 		case "rename":
@@ -178,7 +188,7 @@ func (m *NvimManager) RedoFiles(ops []Operation, stateDir string, progressCb fun
 			failed = append(failed, op.Path)
 		}
 		if progressCb != nil {
-			progressCb(i + 1)
+			progressCb(i+1, len(ops))
 		}
 	}
 	return redone, failed
