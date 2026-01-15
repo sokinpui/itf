@@ -6,6 +6,8 @@ Golang rewrite of python [itf](https://github.com/sokinpui/itf)
 
 It can create new files, modify existing ones using code blocks, or apply changes from diff blocks.
 
+Use neovimUnder the hood to handle file operations, make sure your existing Neovim have undodir setup.
+
 ## Features
 
 - **Clipboard & Pipe Integration**: Reads content directly from your clipboard or standard input.
@@ -43,6 +45,7 @@ pbpaste | itf
 Given the following content on your clipboard:
 
 `path/to/hello.go`
+
 ```go
 package main
 
