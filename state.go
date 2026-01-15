@@ -12,11 +12,13 @@ import (
 )
 
 const (
-	stateDirName   = ".itf"
-	stateFileName  = "states.itf"
-	TrashDir       = "trash"
-	BlobsDir       = "blobs"
-	entrySeparator = "\n----\n"
+	stateDirName    = ".itf"
+	stateFileName   = "states.itf"
+	TrashDir        = "trash"
+	BlobsDir        = "blobs"
+	entrySeparator  = "\n===\n"
+	opSeparator     = "\n---\n"
+	none            = "-"
 )
 
 type Operation struct {
@@ -79,38 +81,30 @@ func (m *StateManager) load() error {
 	m.state = &State{CurrentIndex: idx, History: []HistoryEntry{}}
 
 	for _, b := range blocks[1:] {
-		content := strings.TrimSpace(b)
-		if content == "" {
-			continue
-		}
-
-		lines := strings.Split(content, "\n")
 		entry := HistoryEntry{}
-		for i := 0; i < len(lines); {
-			if strings.TrimSpace(lines[i]) == "" {
-				i++
+		ops := strings.Split(strings.TrimSpace(b), opSeparator)
+		for _, opBlock := range ops {
+			lines := strings.Split(strings.TrimSpace(opBlock), "\n")
+			if len(lines) < 6 {
 				continue
 			}
 
-			if i+4 >= len(lines) {
-				break
+			val := func(s string) string {
+				s = strings.TrimSpace(s)
+				if s == none {
+					return ""
+				}
+				return s
 			}
 
-			ts, _ := strconv.ParseInt(strings.TrimSpace(lines[i]), 10, 64)
 			op := Operation{
-				Timestamp:      ts,
-				Action:         lines[i+1],
-				Path:           lines[i+2],
-				OldContentHash: lines[i+3],
-				ContentHash:    lines[i+4],
+				Timestamp:      parseTimestamp(lines[0]),
+				Action:         val(lines[1]),
+				Path:           val(lines[2]),
+				OldContentHash: val(lines[3]),
+				ContentHash:    val(lines[4]),
+				NewPath:        val(lines[5]),
 			}
-			i += 5
-
-			if op.Action == "rename" && i < len(lines) {
-				op.NewPath = lines[i]
-				i++
-			}
-
 			entry.Operations = append(entry.Operations, op)
 		}
 		m.state.History = append(m.state.History, entry)
@@ -118,20 +112,32 @@ func (m *StateManager) load() error {
 	return nil
 }
 
+func parseTimestamp(s string) int64 {
+	ts, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	return ts
+}
+
 func (m *StateManager) save() {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%d", m.state.CurrentIndex))
+	fmt.Fprintf(&b, "%d", m.state.CurrentIndex)
 	for _, e := range m.state.History {
 		b.WriteString(entrySeparator)
-		for _, op := range e.Operations {
-			b.WriteString(fmt.Sprintf("%d\n%s\n%s\n%s\n%s", op.Timestamp, op.Action, op.Path, op.OldContentHash, op.ContentHash))
-			if op.Action == "rename" {
-				b.WriteString("\n" + op.NewPath)
+
+		placeholder := func(s string) string {
+			if s == "" {
+				return none
 			}
-			b.WriteString("\n")
+			return s
+		}
+
+		for i, op := range e.Operations {
+			fmt.Fprintf(&b, "%d\n%s\n%s\n%s\n%s\n%s", op.Timestamp, placeholder(op.Action), placeholder(op.Path), placeholder(op.OldContentHash), placeholder(op.ContentHash), placeholder(op.NewPath))
+			if i < len(e.Operations)-1 {
+				b.WriteString(opSeparator)
+			}
 		}
 	}
-	_ = os.WriteFile(m.statePath, []byte(strings.TrimSpace(b.String())), 0644)
+	_ = os.WriteFile(m.statePath, []byte(b.String()), 0644)
 }
 
 func (m *StateManager) Sync() {

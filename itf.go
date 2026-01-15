@@ -125,6 +125,7 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		}
 	}
 
+	var renamedSuccess []string
 	renamed := make(map[string]string)
 	var failedRenames []string
 	for _, r := range plan.Renames {
@@ -136,20 +137,21 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		}
 		if os.Rename(r.OldPath, r.NewPath) == nil {
 			renamed[r.OldPath] = r.NewPath
+			renamedSuccess = append(renamedSuccess, r.OldPath)
 		} else {
 			failedRenames = append(failedRenames, r.OldPath)
 		}
 	}
 
 	updated, failedNvim := m.ApplyChanges(plan.Changes, func(c int) {
-		if a.progressCallback != nil {
-			a.progressCallback(c, len(plan.Changes))
-		}
+		a.reportProgress(c, len(plan.Changes))
 	})
 
-	if !a.cfg.Buffer && len(updated)+len(deleted)+len(renamed) > 0 {
+	if !a.cfg.Buffer && len(updated)+len(deleted)+len(renamedSuccess) > 0 {
 		m.SaveAllBuffers()
-		ops := a.stateManager.CreateOperations(append(updated, deleted...), plan.FileActions, plan.Renames, oldHashes)
+		historyPaths := append(updated, deleted...)
+		historyPaths = append(historyPaths, renamedSuccess...)
+		ops := a.stateManager.CreateOperations(historyPaths, plan.FileActions, plan.Renames, oldHashes)
 		a.stateManager.Write(ops)
 	}
 
@@ -162,6 +164,16 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		}
 	}
 
+	return a.createSummary(created, modified, deleted, renamed, failedNvim, failedDeletes, failedRenames)
+}
+
+func (a *App) reportProgress(current, total int) {
+	if a.progressCallback != nil {
+		a.progressCallback(current, total)
+	}
+}
+
+func (a *App) createSummary(created, modified, deleted []string, renamed map[string]string, failedNvim, failedDeletes, failedRenames []string) (Summary, error) {
 	var renamedPaths []string
 	for oldPath, newPath := range renamed {
 		renamedPaths = append(renamedPaths, fmt.Sprintf("%s -> %s", oldPath, newPath))
