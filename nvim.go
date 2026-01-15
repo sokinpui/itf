@@ -80,7 +80,7 @@ func (m *NvimManager) Close() {
 	}
 }
 
-func (m *NvimManager) ApplyChanges(changes []FileChange, progressCb ProgressUpdate) (updated, failed []string) {
+func (m *NvimManager) ApplyChanges(changes []FileChange, progressCb func(int)) (updated, failed []string) {
 	for i, change := range changes {
 		if m.updateBuffer(change.Path, change.Content) {
 			updated = append(updated, change.Path)
@@ -88,7 +88,7 @@ func (m *NvimManager) ApplyChanges(changes []FileChange, progressCb ProgressUpda
 			failed = append(failed, change.Path)
 		}
 		if progressCb != nil {
-			progressCb(i+1, len(changes))
+			progressCb(i + 1)
 		}
 	}
 	return updated, failed
@@ -116,11 +116,7 @@ func (m *NvimManager) SaveAllBuffers() {
 	m.v.Command("wa!")
 }
 
-func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb ProgressUpdate) (undone, failed []string) {
-	if m == nil {
-		return nil, nil
-	}
-
+func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb func(int)) (undone, failed []string) {
 	for i, op := range ops {
 		if m.undoFile(op, stateDir) {
 			undone = append(undone, op.Path)
@@ -128,77 +124,76 @@ func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb Pro
 			failed = append(failed, op.Path)
 		}
 		if progressCb != nil {
-			progressCb(i+1, len(ops))
+			progressCb(i + 1)
 		}
 	}
 	return undone, failed
 }
 
 func (m *NvimManager) undoFile(op Operation, stateDir string) bool {
-	wd, _ := os.Getwd()
-	if op.Action == "delete" {
-		return RestoreFileFromTrash(op.Path, filepath.Join(stateDir, TrashDir), wd) == nil
+	currentPath := op.Path
+	if op.Action == "rename" {
+		currentPath = op.NewPath
+	}
+
+	actualHash, _ := GetFileSHA256(currentPath)
+	if actualHash != op.ContentHash {
+		return false
 	}
 
 	if op.Action == "rename" {
 		return os.Rename(op.NewPath, op.Path) == nil
 	}
 
-	currentHash, err := GetFileSHA256(op.Path)
-	if err != nil {
-		return op.Action == "create" && os.IsNotExist(err)
-	}
-
-	if currentHash != op.ContentHash {
-		return false
-	}
-
 	if op.Action == "create" {
 		return os.Remove(op.Path) == nil
 	}
 
-	absPath, _ := filepath.Abs(op.Path)
-	b := m.v.NewBatch()
-	b.Command(fmt.Sprintf("edit! %s", absPath))
-	b.Command("undo")
-	b.Command("write")
-	return b.Execute() == nil
-}
-
-func (m *NvimManager) RedoFiles(ops []Operation, stateDir string, progressCb ProgressUpdate) (redone, failed []string) {
-	if m == nil {
-		return nil, nil
+	content, err := ReadBlob(stateDir, op.OldContentHash)
+	if err != nil {
+		return false
 	}
 
-	for i, op := range ops {
-		success := false
-		wd, _ := os.Getwd()
-		switch op.Action {
-		case "delete":
-			success = TrashFile(op.Path, filepath.Join(stateDir, TrashDir), wd) == nil
-		case "create", "modify":
-			success = m.redoBufferOp(op.Path)
-		case "rename":
-			success = os.Rename(op.Path, op.NewPath) == nil
-		}
+	if op.Action == "delete" {
+		_ = os.MkdirAll(filepath.Dir(op.Path), 0755)
+	}
 
-		if success {
+	return os.WriteFile(op.Path, content, 0644) == nil
+}
+
+func (m *NvimManager) RedoFiles(ops []Operation, stateDir string, progressCb func(int)) (redone, failed []string) {
+	for i, op := range ops {
+		if m.redoFile(op, stateDir) {
 			redone = append(redone, op.Path)
 		} else {
 			failed = append(failed, op.Path)
 		}
 		if progressCb != nil {
-			progressCb(i+1, len(ops))
+			progressCb(i + 1)
 		}
 	}
 	return redone, failed
 }
 
-func (m *NvimManager) redoBufferOp(filePath string) bool {
-	absPath, _ := filepath.Abs(filePath)
-	b := m.v.NewBatch()
-	b.Command(fmt.Sprintf("edit! %s", absPath))
-	b.Command("redo")
-	b.Command("write")
-	return b.Execute() == nil
+func (m *NvimManager) redoFile(op Operation, stateDir string) bool {
+	actualHash, _ := GetFileSHA256(op.Path)
+	if actualHash != op.OldContentHash {
+		return false
+	}
+
+	if op.Action == "rename" {
+		return os.Rename(op.Path, op.NewPath) == nil
+	}
+
+	if op.Action == "delete" {
+		return os.Remove(op.Path) == nil
+	}
+
+	content, err := ReadBlob(stateDir, op.ContentHash)
+	if err != nil {
+		return false
+	}
+
+	_ = os.MkdirAll(filepath.Dir(op.Path), 0755)
+	return os.WriteFile(op.Path, content, 0644) == nil
 }

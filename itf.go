@@ -99,11 +99,26 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 	}
 	defer m.Close()
 
+	oldHashes := make(map[string]string)
+	for _, c := range plan.Changes {
+		h, _ := GetFileSHA256(c.Path)
+		oldHashes[c.Path] = h
+		if h != "" {
+			content, _ := os.ReadFile(c.Path)
+			_ = WriteBlob(a.stateManager.StateDir, h, content)
+		}
+	}
+
 	var deleted, failedDeletes []string
 	trash := filepath.Join(a.stateManager.StateDir, TrashDir)
-	wd, _ := os.Getwd()
 	for _, p := range plan.Deletes {
-		if TrashFile(p, trash, wd) == nil {
+		h, _ := GetFileSHA256(p)
+		oldHashes[p] = h
+		if h != "" {
+			content, _ := os.ReadFile(p)
+			_ = WriteBlob(a.stateManager.StateDir, h, content)
+		}
+		if TrashFile(p, trash, ".") == nil {
 			deleted = append(deleted, p)
 		} else {
 			failedDeletes = append(failedDeletes, p)
@@ -113,6 +128,12 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 	renamed := make(map[string]string)
 	var failedRenames []string
 	for _, r := range plan.Renames {
+		h, _ := GetFileSHA256(r.OldPath)
+		oldHashes[r.OldPath] = h
+		if h != "" {
+			content, _ := os.ReadFile(r.OldPath)
+			_ = WriteBlob(a.stateManager.StateDir, h, content)
+		}
 		if os.Rename(r.OldPath, r.NewPath) == nil {
 			renamed[r.OldPath] = r.NewPath
 		} else {
@@ -120,21 +141,16 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		}
 	}
 
-	updated, failedNvim := m.ApplyChanges(plan.Changes, a.progressCallback)
-
-	var successfulPaths []string
-	successfulPaths = append(successfulPaths, updated...)
-	successfulPaths = append(successfulPaths, deleted...)
-	for oldPath := range renamed {
-		successfulPaths = append(successfulPaths, oldPath)
-	}
-
-	if !a.cfg.Buffer && len(successfulPaths) > 0 {
-		m.SaveAllBuffers()
-		ops := a.stateManager.CreateOperations(successfulPaths, plan.FileActions, plan.Renames)
-		if len(ops) > 0 {
-			a.stateManager.Write(ops)
+	updated, failedNvim := m.ApplyChanges(plan.Changes, func(c int) {
+		if a.progressCallback != nil {
+			a.progressCallback(c, len(plan.Changes))
 		}
+	})
+
+	if !a.cfg.Buffer && len(updated)+len(deleted)+len(renamed) > 0 {
+		m.SaveAllBuffers()
+		ops := a.stateManager.CreateOperations(append(updated, deleted...), plan.FileActions, plan.Renames, oldHashes)
+		a.stateManager.Write(ops)
 	}
 
 	var created, modified []string
@@ -188,10 +204,8 @@ func (a *App) undoLastOperation() (Summary, error) {
 		return Summary{Message: "No undo"}, nil
 	}
 	m, _ := NewNvimManager()
-	if m != nil {
-		defer m.Close()
-	}
-	undone, failed := m.UndoFiles(ops, a.stateManager.StateDir, a.progressCallback)
+	defer m.Close()
+	undone, failed := m.UndoFiles(ops, a.stateManager.StateDir, nil)
 	s := Summary{Modified: undone, Failed: failed, Message: "Undone"}
 	a.relativizeSummaryPaths(&s)
 	return s, nil
@@ -203,10 +217,8 @@ func (a *App) redoLastOperation() (Summary, error) {
 		return Summary{Message: "No redo"}, nil
 	}
 	m, _ := NewNvimManager()
-	if m != nil {
-		defer m.Close()
-	}
-	redone, failed := m.RedoFiles(ops, a.stateManager.StateDir, a.progressCallback)
+	defer m.Close()
+	redone, failed := m.RedoFiles(ops, a.stateManager.StateDir, nil)
 	s := Summary{Modified: redone, Failed: failed, Message: "Redone"}
 	a.relativizeSummaryPaths(&s)
 	return s, nil

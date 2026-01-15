@@ -130,3 +130,18 @@ func RestoreFileFromTrash(originalPath string, trashPath string, wd string) erro
 
 	return os.Rename(srcPath, absPath)
 }
+
+func WriteBlob(dir string, hash string, content []byte) error {
+	blobDir := filepath.Join(dir, "blobs")
+	if err := os.MkdirAll(blobDir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(blobDir, hash), content, 0644)
+}
+
+func ReadBlob(dir string, hash string) ([]byte, error) {
+	if hash == "" {
+		return []byte{}, nil
+	}
+	return os.ReadFile(filepath.Join(dir, "blobs", hash))
+}

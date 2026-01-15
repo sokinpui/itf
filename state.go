@@ -12,20 +12,23 @@ import (
 )
 
 const (
-	stateDirName  = ".itf"
-	stateFileName = "state.itf"
-	TrashDir      = "trash"
+	stateDirName   = ".itf"
+	stateFileName  = "states.itf"
+	TrashDir       = "trash"
+	BlobsDir       = "blobs"
+	entrySeparator = "\n----\n"
 )
 
 type Operation struct {
-	Path        string
-	Action      string
-	ContentHash string
-	NewPath     string
+	Timestamp      int64
+	Action         string
+	Path           string
+	OldContentHash string
+	ContentHash    string
+	NewPath        string
 }
 
 type HistoryEntry struct {
-	Timestamp  int64
 	Operations []Operation
 }
 
@@ -56,9 +59,8 @@ func NewStateManager() (*StateManager, error) {
 		return nil, err
 	}
 	m := &StateManager{statePath: filepath.Join(dir, stateFileName), StateDir: dir}
-	if err := m.load(); err != nil {
-		m.state = &State{CurrentIndex: -1, History: []HistoryEntry{}}
-	}
+	m.state = &State{CurrentIndex: -1, History: []HistoryEntry{}}
+	_ = m.load()
 	return m, nil
 }
 
@@ -68,7 +70,7 @@ func (m *StateManager) load() error {
 		return err
 	}
 
-	blocks := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n\n")
+	blocks := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), entrySeparator)
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -83,12 +85,26 @@ func (m *StateManager) load() error {
 		}
 
 		lines := strings.Split(content, "\n")
-		ts, _ := strconv.ParseInt(lines[0], 10, 64)
-		entry := HistoryEntry{Timestamp: ts}
+		entry := HistoryEntry{}
+		for i := 0; i < len(lines); {
+			if strings.TrimSpace(lines[i]) == "" {
+				i++
+				continue
+			}
 
-		for i := 1; i+2 < len(lines); {
-			op := Operation{Action: lines[i], Path: lines[i+1], ContentHash: lines[i+2]}
-			i += 3
+			if i+4 >= len(lines) {
+				break
+			}
+
+			ts, _ := strconv.ParseInt(strings.TrimSpace(lines[i]), 10, 64)
+			op := Operation{
+				Timestamp:      ts,
+				Action:         lines[i+1],
+				Path:           lines[i+2],
+				OldContentHash: lines[i+3],
+				ContentHash:    lines[i+4],
+			}
+			i += 5
 
 			if op.Action == "rename" && i < len(lines) {
 				op.NewPath = lines[i]
@@ -106,22 +122,72 @@ func (m *StateManager) save() {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%d", m.state.CurrentIndex))
 	for _, e := range m.state.History {
-		b.WriteString(fmt.Sprintf("\n\n%d", e.Timestamp))
+		b.WriteString(entrySeparator)
 		for _, op := range e.Operations {
-			b.WriteString(fmt.Sprintf("\n%s\n%s\n%s", op.Action, op.Path, op.ContentHash))
+			b.WriteString(fmt.Sprintf("%d\n%s\n%s\n%s\n%s", op.Timestamp, op.Action, op.Path, op.OldContentHash, op.ContentHash))
 			if op.Action == "rename" {
 				b.WriteString("\n" + op.NewPath)
 			}
+			b.WriteString("\n")
 		}
 	}
-	os.WriteFile(m.statePath, []byte(b.String()), 0644)
+	_ = os.WriteFile(m.statePath, []byte(strings.TrimSpace(b.String())), 0644)
+}
+
+func (m *StateManager) Sync() {
+	if m.state.CurrentIndex < 0 {
+		return
+	}
+
+	for i := m.state.CurrentIndex; i >= 0; i-- {
+		if m.matchState(i) {
+			if i < m.state.CurrentIndex {
+				m.state.History = m.state.History[:i+1]
+				m.state.CurrentIndex = i
+				m.save()
+			}
+			return
+		}
+	}
+
+	m.state.History = []HistoryEntry{}
+	m.state.CurrentIndex = -1
+	m.save()
+}
+
+func (m *StateManager) matchState(idx int) bool {
+	if idx < 0 || idx >= len(m.state.History) {
+		return false
+	}
+
+	entry := m.state.History[idx]
+	for _, op := range entry.Operations {
+		path := op.Path
+		if op.Action == "rename" {
+			path = op.NewPath
+		}
+		
+		currentHash, err := GetFileSHA256(path)
+		if op.Action == "delete" {
+			if err == nil {
+				return false
+			}
+			continue
+		}
+
+		if err != nil || currentHash != op.ContentHash {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *StateManager) Write(ops []Operation) {
+	m.Sync()
 	if m.state.CurrentIndex < len(m.state.History)-1 {
 		m.state.History = m.state.History[:m.state.CurrentIndex+1]
 	}
-	m.state.History = append(m.state.History, HistoryEntry{Timestamp: time.Now().UTC().Unix(), Operations: ops})
+	m.state.History = append(m.state.History, HistoryEntry{Operations: ops})
 	m.state.CurrentIndex++
 	m.save()
 }
@@ -146,40 +212,40 @@ func (m *StateManager) GetOperationsToRedo() []Operation {
 	return ops
 }
 
-func (m *StateManager) CreateOperations(updated []string, actions map[string]string, renames []FileRename) []Operation {
+func (m *StateManager) CreateOperations(updated []string, actions map[string]string, renames []FileRename, oldHashes map[string]string) []Operation {
 	var ops []Operation
 	rm := make(map[string]string)
 	for _, r := range renames {
 		rm[r.OldPath] = r.NewPath
 	}
 
-	wd, _ := os.Getwd()
-
+	now := time.Now().UTC().Unix()
 	for _, f := range updated {
-		a := actions[f]
-		pfh, np := f, ""
-
-		if a == "delete" {
-			rel, _ := filepath.Rel(wd, f)
-			pfh = filepath.Join(m.StateDir, TrashDir, rel)
-		} else if a == "rename" {
-			np = rm[f]
-			pfh = np
+		action := actions[f]
+		checkPath, newPath := f, ""
+		
+		if action == "rename" {
+			newPath = rm[f]
+			checkPath = newPath
+		} else if action == "delete" {
+			rel, _ := filepath.Rel(".", f)
+			checkPath = filepath.Join(m.StateDir, TrashDir, rel)
 		}
 
-		h, _ := GetFileSHA256(pfh)
-
-		relPath, err := filepath.Rel(wd, f)
-		if err != nil {
-			relPath = f
+		currentHash, _ := GetFileSHA256(checkPath)
+		if action != "delete" && currentHash != "" {
+			content, _ := os.ReadFile(checkPath)
+			_ = WriteBlob(m.StateDir, currentHash, content)
 		}
 
-		relNewPath, err := filepath.Rel(wd, np)
-		if err != nil || np == "" {
-			relNewPath = np
-		}
-
-		ops = append(ops, Operation{Path: relPath, Action: a, ContentHash: h, NewPath: relNewPath})
+		ops = append(ops, Operation{
+			Timestamp:      now,
+			Path:           f,
+			Action:         action,
+			OldContentHash: oldHashes[f],
+			ContentHash:    currentHash,
+			NewPath:        newPath,
+		})
 	}
 	sort.Slice(ops, func(i, j int) bool { return ops[i].Path < ops[j].Path })
 	return ops
