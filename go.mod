@@ -6,7 +6,6 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/neovim/go-client v1.2.1
 	github.com/spf13/cobra v1.10.1
 	github.com/yuin/goldmark v1.7.13
 )

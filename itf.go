@@ -9,7 +9,6 @@ import (
 )
 
 type Config struct {
-	Buffer        bool
 	OutputTool    bool
 	OutputDiffFix bool
 	Undo          bool
@@ -25,6 +24,7 @@ type App struct {
 	stateManager     *StateManager
 	pathResolver     *PathResolver
 	sourceProvider   *SourceProvider
+	fileManager      *FileManager
 	progressCallback ProgressUpdate
 }
 
@@ -45,6 +45,7 @@ func NewApp(cfg *Config) (*App, error) {
 		stateManager:   sm,
 		pathResolver:   NewPathResolver(),
 		sourceProvider: NewSourceProvider(),
+		fileManager:    NewFileManager(),
 	}, nil
 }
 
@@ -93,12 +94,6 @@ func (a *App) processAndApply(content string) (Summary, error) {
 }
 
 func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
-	m, err := NewNvimManager()
-	if err != nil {
-		return Summary{}, err
-	}
-	defer m.Close()
-
 	oldHashes := make(map[string]string)
 	for _, c := range plan.Changes {
 		h, _ := GetFileSHA256(c.Path)
@@ -143,12 +138,11 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		}
 	}
 
-	updated, failedNvim := m.ApplyChanges(plan.Changes, func(c int) {
+	updated, failedWrite := a.fileManager.WriteChanges(plan.Changes, func(c int) {
 		a.reportProgress(c, len(plan.Changes))
 	})
 
-	if !a.cfg.Buffer && len(updated)+len(deleted)+len(renamedSuccess) > 0 {
-		m.SaveAllBuffers()
+	if len(updated)+len(deleted)+len(renamedSuccess) > 0 {
 		historyPaths := append(updated, deleted...)
 		historyPaths = append(historyPaths, renamedSuccess...)
 		ops := a.stateManager.CreateOperations(historyPaths, plan.FileActions, plan.Renames, oldHashes)
@@ -164,7 +158,7 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		}
 	}
 
-	return a.createSummary(created, modified, deleted, renamed, failedNvim, failedDeletes, failedRenames)
+	return a.createSummary(created, modified, deleted, renamed, failedWrite, failedDeletes, failedRenames)
 }
 
 func (a *App) reportProgress(current, total int) {
@@ -215,9 +209,7 @@ func (a *App) undoLastOperation() (Summary, error) {
 	if len(ops) == 0 {
 		return Summary{Message: "No undo"}, nil
 	}
-	m, _ := NewNvimManager()
-	defer m.Close()
-	s := m.UndoFiles(ops, a.stateManager.StateDir, nil)
+	s := a.fileManager.Undo(ops, a.stateManager.StateDir)
 	s.Message = "Undone"
 	a.relativizeSummaryPaths(&s)
 	return s, nil
@@ -228,9 +220,7 @@ func (a *App) redoLastOperation() (Summary, error) {
 	if len(ops) == 0 {
 		return Summary{Message: "No redo"}, nil
 	}
-	m, _ := NewNvimManager()
-	defer m.Close()
-	s := m.RedoFiles(ops, a.stateManager.StateDir, nil)
+	s := a.fileManager.Redo(ops, a.stateManager.StateDir)
 	s.Message = "Redone"
 	a.relativizeSummaryPaths(&s)
 	return s, nil

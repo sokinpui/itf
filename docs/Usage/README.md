@@ -98,7 +98,6 @@ config.yaml config.yml
 | Flag                | Shorthand | Description                                                                       |
 | ------------------- | --------- | --------------------------------------------------------------------------------- |
 | `--extension`       | `-e`      | Filter by file extension (e.g., `-e go -e js`). Use `-e diff` for diff-only mode. |
-| `--buffer`          | `-b`      | Apply changes to Neovim buffers without saving them to disk.                      |
 | `--undo`            | `-u`      | Undo the last operation.                                                          |
 | `--redo`            | `-r`      | Redo the last undone operation.                                                   |
 | `--output-tool`     | `-t`      | Print the content of `tool` blocks instead of applying changes.                   |

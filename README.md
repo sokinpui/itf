@@ -12,7 +12,7 @@ Use neovimUnder the hood to handle file operations, make sure your existing Neov
 
 - **Clipboard & Pipe Integration**: Reads content directly from your clipboard or standard input.
 - **File & Diff Block Parsing**: Intelligently parses markdown to identify file paths and content for file creation/modification, as well as diff hunks for patching.
-- **Neovim Integration**: Uses Neovim under the hood to apply changes, either to files on disk or just to buffers. It can connect to a running Neovim instance or start its own headless one.
+- **Direct File Modification**: Applies changes directly to your local filesystem.
 - **Undo/Redo**: Supports undoing and redoing file operations.
 - **Interactive TUI**: Provides real-time feedback on the operations being performed.
 - **Tool Call Extraction**: Can extract and print `tool` code blocks.

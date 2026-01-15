@@ -8,7 +8,6 @@ import (
 )
 
 type CLIConfig struct {
-	Buffer        bool
 	OutputTool    bool
 	OutputDiffFix bool
 	Undo          bool
@@ -39,7 +38,6 @@ Example: pbpaste | itf -e py`,
 		normalizeExtensions()
 
 		itfCfg := &Config{
-			Buffer:        cfg.Buffer,
 			OutputTool:    cfg.OutputTool,
 			OutputDiffFix: cfg.OutputDiffFix,
 			Undo:          cfg.Undo,
@@ -88,7 +86,6 @@ func normalizeExtensions() {
 
 func init() {
 	rootCmd.Flags().StringVar(&cfg.Completion, "completion", "", "Generate completion script")
-	rootCmd.Flags().BoolVarP(&cfg.Buffer, "buffer", "b", false, "Update buffers in Neovim without saving")
 	rootCmd.Flags().BoolVarP(&cfg.OutputTool, "output-tool", "t", false, "Print tool blocks")
 	rootCmd.Flags().BoolVarP(&cfg.OutputDiffFix, "output-diff-fix", "o", false, "Print corrected diff")
 	rootCmd.Flags().BoolVar(&cfg.NoAnimation, "no-animation", false, "Disable spinner")
