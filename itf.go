@@ -217,8 +217,8 @@ func (a *App) undoLastOperation() (Summary, error) {
 	}
 	m, _ := NewNvimManager()
 	defer m.Close()
-	undone, failed := m.UndoFiles(ops, a.stateManager.StateDir, nil)
-	s := Summary{Modified: undone, Failed: failed, Message: "Undone"}
+	s := m.UndoFiles(ops, a.stateManager.StateDir, nil)
+	s.Message = "Undone"
 	a.relativizeSummaryPaths(&s)
 	return s, nil
 }
@@ -230,8 +230,8 @@ func (a *App) redoLastOperation() (Summary, error) {
 	}
 	m, _ := NewNvimManager()
 	defer m.Close()
-	redone, failed := m.RedoFiles(ops, a.stateManager.StateDir, nil)
-	s := Summary{Modified: redone, Failed: failed, Message: "Redone"}
+	s := m.RedoFiles(ops, a.stateManager.StateDir, nil)
+	s.Message = "Redone"
 	a.relativizeSummaryPaths(&s)
 	return s, nil
 }

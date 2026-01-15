@@ -116,18 +116,28 @@ func (m *NvimManager) SaveAllBuffers() {
 	m.v.Command("wa!")
 }
 
-func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb func(int)) (undone, failed []string) {
+func (m *NvimManager) UndoFiles(ops []Operation, stateDir string, progressCb func(int)) Summary {
+	var s Summary
 	for i, op := range ops {
 		if m.undoFile(op, stateDir) {
-			undone = append(undone, op.Path)
+			switch op.Action {
+			case "create":
+				s.Deleted = append(s.Deleted, op.Path)
+			case "delete":
+				s.Created = append(s.Created, op.Path)
+			case "modify":
+				s.Modified = append(s.Modified, op.Path)
+			case "rename":
+				s.Renamed = append(s.Renamed, fmt.Sprintf("%s -> %s", op.NewPath, op.Path))
+			}
 		} else {
-			failed = append(failed, op.Path)
+			s.Failed = append(s.Failed, op.Path)
 		}
 		if progressCb != nil {
 			progressCb(i + 1)
 		}
 	}
-	return undone, failed
+	return s
 }
 
 func (m *NvimManager) undoFile(op Operation, stateDir string) bool {
@@ -161,18 +171,28 @@ func (m *NvimManager) undoFile(op Operation, stateDir string) bool {
 	return os.WriteFile(op.Path, content, 0644) == nil
 }
 
-func (m *NvimManager) RedoFiles(ops []Operation, stateDir string, progressCb func(int)) (redone, failed []string) {
+func (m *NvimManager) RedoFiles(ops []Operation, stateDir string, progressCb func(int)) Summary {
+	var s Summary
 	for i, op := range ops {
 		if m.redoFile(op, stateDir) {
-			redone = append(redone, op.Path)
+			switch op.Action {
+			case "create":
+				s.Created = append(s.Created, op.Path)
+			case "delete":
+				s.Deleted = append(s.Deleted, op.Path)
+			case "modify":
+				s.Modified = append(s.Modified, op.Path)
+			case "rename":
+				s.Renamed = append(s.Renamed, fmt.Sprintf("%s -> %s", op.Path, op.NewPath))
+			}
 		} else {
-			failed = append(failed, op.Path)
+			s.Failed = append(s.Failed, op.Path)
 		}
 		if progressCb != nil {
 			progressCb(i + 1)
 		}
 	}
-	return redone, failed
+	return s
 }
 
 func (m *NvimManager) redoFile(op Operation, stateDir string) bool {
