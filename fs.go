@@ -1,6 +1,8 @@
 package itf
 
 import (
+	"bytes"
+	"compress/zlib"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -137,12 +139,40 @@ func WriteBlob(dir string, hash string, content []byte) error {
 	if err := os.MkdirAll(blobDir, 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(blobDir, hash), content, 0644)
+
+	var b bytes.Buffer
+	w := zlib.NewWriter(&b)
+	if _, err := w.Write(content); err != nil {
+		return err
+	}
+	w.Close()
+
+	return os.WriteFile(filepath.Join(blobDir, hash), b.Bytes(), 0644)
 }
 
 func ReadBlob(dir string, hash string) ([]byte, error) {
 	if hash == "" {
 		return []byte{}, nil
 	}
-	return os.ReadFile(filepath.Join(dir, "blobs", hash))
+
+	data, err := os.ReadFile(filepath.Join(dir, "blobs", hash))
+	if err != nil {
+		return nil, err
+	}
+
+	if !isZlibCompressed(data) {
+		return data, nil
+	}
+
+	r, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return data, nil
+	}
+	defer r.Close()
+
+	return io.ReadAll(r)
+}
+
+func isZlibCompressed(data []byte) bool {
+	return len(data) > 2 && data[0] == 0x78
 }
