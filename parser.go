@@ -36,11 +36,17 @@ func CreatePlan(content string, resolver *PathResolver, extensions []string, fil
 		fileBlocks = parseFileBlocks(allBlocks, resolver, extensions, allowedFiles)
 	}
 
+	renames := parseRenameBlocks(allBlocks, resolver, allowedFiles)
+	renameDestToSource := make(map[string]string)
+	renameDestSet := make(map[string]struct{})
+	for _, r := range renames {
+		renameDestToSource[r.NewPath] = r.OldPath
+		renameDestSet[r.NewPath] = struct{}{}
+	}
+
 	diffBlocks := extractDiffBlocksFromParsed(allBlocks, resolver, allowedFiles)
 	deletePaths := parseDeletePaths(allBlocks, resolver, allowedFiles)
-	renames := parseRenameBlocks(allBlocks, resolver, allowedFiles)
-
-	patchedChanges, failedPatches, err := GeneratePatchedContents(diffBlocks, resolver, extensions)
+	patchedChanges, failedPatches, err := GeneratePatchedContents(diffBlocks, resolver, extensions, renameDestToSource)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +66,7 @@ func CreatePlan(content string, resolver *PathResolver, extensions []string, fil
 		targetPaths = append(targetPaths, c.Path)
 	}
 
-	actions, dirs := GetFileActionsAndDirs(targetPaths)
+	actions, dirs := GetFileActionsAndDirs(targetPaths, renameDestSet)
 	for _, p := range deletePaths {
 		actions[p] = "delete"
 	}

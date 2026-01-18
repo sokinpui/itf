@@ -94,71 +94,98 @@ func (a *App) processAndApply(content string) (Summary, error) {
 }
 
 func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
-	oldHashes := make(map[string]string)
+	var creates, modifies []FileChange
 	for _, c := range plan.Changes {
-		h, _ := GetFileSHA256(c.Path)
-		oldHashes[c.Path] = h
-		if h != "" {
-			content, _ := os.ReadFile(c.Path)
-			_ = WriteBlob(a.stateManager.StateDir, h, content)
+		if plan.FileActions[c.Path] == "create" {
+			creates = append(creates, c)
+			continue
 		}
+		modifies = append(modifies, c)
 	}
 
-	var deleted, failedDeletes []string
-	trash := filepath.Join(a.stateManager.StateDir, TrashDir)
-	for _, p := range plan.Deletes {
-		h, _ := GetFileSHA256(p)
-		oldHashes[p] = h
-		if h != "" {
-			content, _ := os.ReadFile(p)
-			_ = WriteBlob(a.stateManager.StateDir, h, content)
-		}
-		if TrashFile(p, trash, ".") == nil {
-			deleted = append(deleted, p)
-		} else {
-			failedDeletes = append(failedDeletes, p)
-		}
+	totalOps := len(creates) + len(plan.Renames) + len(modifies) + len(plan.Deletes)
+	currentOp := 0
+	oldHashes := make(map[string]string)
+	progress := func() {
+		currentOp++
+		a.reportProgress(currentOp, totalOps)
 	}
 
+	// 1. Create
+	created, failedCreate := a.fileManager.WriteChanges(creates, func(_ int) { progress() })
+
+	// 2. Rename
 	var renamedSuccess []string
 	renamed := make(map[string]string)
 	var failedRenames []string
 	for _, r := range plan.Renames {
-		h, _ := GetFileSHA256(r.OldPath)
-		oldHashes[r.OldPath] = h
-		if h != "" {
-			content, _ := os.ReadFile(r.OldPath)
-			_ = WriteBlob(a.stateManager.StateDir, h, content)
-		}
+		a.backupFileState(r.OldPath, oldHashes)
 		if os.Rename(r.OldPath, r.NewPath) == nil {
 			renamed[r.OldPath] = r.NewPath
 			renamedSuccess = append(renamedSuccess, r.OldPath)
 		} else {
 			failedRenames = append(failedRenames, r.OldPath)
 		}
+		progress()
 	}
 
-	updated, failedWrite := a.fileManager.WriteChanges(plan.Changes, func(c int) {
-		a.reportProgress(c, len(plan.Changes))
-	})
-
-	if len(updated)+len(deleted)+len(renamedSuccess) > 0 {
-		historyPaths := append(updated, deleted...)
-		historyPaths = append(historyPaths, renamedSuccess...)
-		ops := a.stateManager.CreateOperations(historyPaths, plan.FileActions, plan.Renames, oldHashes)
-		a.stateManager.Write(ops)
+	// 3. Modify
+	for _, c := range modifies {
+		a.backupFileState(c.Path, oldHashes)
 	}
+	modified, failedModify := a.fileManager.WriteChanges(modifies, func(_ int) { progress() })
 
-	var created, modified []string
-	for _, p := range updated {
-		if plan.FileActions[p] == "create" {
-			created = append(created, p)
+	// 4. Delete
+	var deleted, failedDeletes []string
+	trash := filepath.Join(a.stateManager.StateDir, TrashDir)
+	for _, p := range plan.Deletes {
+		a.backupFileState(p, oldHashes)
+		if TrashFile(p, trash, ".") == nil {
+			deleted = append(deleted, p)
 		} else {
-			modified = append(modified, p)
+			failedDeletes = append(failedDeletes, p)
 		}
+		progress()
 	}
 
-	return a.createSummary(created, modified, deleted, renamed, failedWrite, failedDeletes, failedRenames)
+	a.recordHistory(created, modified, deleted, renamedSuccess, plan, oldHashes)
+
+	return a.createSummary(
+		created,
+		modified,
+		deleted,
+		renamed,
+		append(failedCreate, failedModify...),
+		failedDeletes,
+		failedRenames,
+	)
+}
+
+func (a *App) backupFileState(path string, hashes map[string]string) {
+	h, err := GetFileSHA256(path)
+	if err != nil {
+		return
+	}
+	hashes[path] = h
+	if content, err := os.ReadFile(path); err == nil {
+		_ = WriteBlob(a.stateManager.StateDir, h, content)
+	}
+}
+
+func (a *App) recordHistory(created, modified, deleted, renamed []string, plan *ExecutionPlan, oldHashes map[string]string) {
+	successCount := len(created) + len(modified) + len(deleted) + len(renamed)
+	if successCount == 0 {
+		return
+	}
+
+	historyPaths := make([]string, 0, successCount)
+	historyPaths = append(historyPaths, created...)
+	historyPaths = append(historyPaths, modified...)
+	historyPaths = append(historyPaths, deleted...)
+	historyPaths = append(historyPaths, renamed...)
+
+	ops := a.stateManager.CreateOperations(historyPaths, plan.FileActions, plan.Renames, oldHashes)
+	a.stateManager.Write(ops)
 }
 
 func (a *App) reportProgress(current, total int) {
@@ -188,7 +215,7 @@ func (a *App) fixAndPrintDiffs() (Summary, error) {
 	c, _ := a.sourceProvider.GetContent()
 	diffs := ExtractDiffBlocks(c, a.pathResolver, a.cfg.Files)
 	for _, d := range diffs {
-		if res, err := CorrectDiff(d, a.pathResolver, a.cfg.Extensions); err == nil {
+		if res, err := CorrectDiff(d, a.pathResolver, a.cfg.Extensions, a.pathResolver.ResolveExisting(d.FilePath)); err == nil {
 			fmt.Print(res)
 		}
 	}

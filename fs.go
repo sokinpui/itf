@@ -64,12 +64,13 @@ func (r *PathResolver) ResolveExisting(relativePath string) string {
 	return ""
 }
 
-func GetFileActionsAndDirs(targetPaths []string) (map[string]string, map[string]struct{}) {
+func GetFileActionsAndDirs(targetPaths []string, renameDestinations map[string]struct{}) (map[string]string, map[string]struct{}) {
 	fileActions := make(map[string]string)
 	dirsToCreate := make(map[string]struct{})
 
 	for _, path := range targetPaths {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		_, isRenameDest := renameDestinations[path]
+		if _, err := os.Stat(path); os.IsNotExist(err) && !isRenameDest {
 			fileActions[path] = "create"
 			dir := filepath.Dir(path)
 			if dir != "." && dir != "/" {

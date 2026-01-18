@@ -17,22 +17,29 @@ func ExtractPathFromDiff(content string) string {
 	return ""
 }
 
-func GeneratePatchedContents(diffs []DiffBlock, resolver *PathResolver, extensions []string) ([]FileChange, []string, error) {
+func GeneratePatchedContents(diffs []DiffBlock, resolver *PathResolver, extensions []string, renameMap map[string]string) ([]FileChange, []string, error) {
 	var changes []FileChange
 	var failed []string
 	for _, d := range diffs {
 		abs := resolver.Resolve(d.FilePath)
+		sourcePath := abs
+		if renameMap != nil {
+			if s, ok := renameMap[abs]; ok {
+				sourcePath = s
+			}
+		}
+
 		if len(extensions) > 0 && !HasAllowedExtension(d.FilePath, extensions) {
 			continue
 		}
 
-		patched, err := CorrectDiff(d, resolver, extensions)
+		patched, err := CorrectDiff(d, resolver, extensions, sourcePath)
 		if err != nil {
 			failed = append(failed, abs)
 			continue
 		}
 
-		applied := applyPatch(d.FilePath, patched, resolver)
+		applied := applyPatch(sourcePath, patched, resolver)
 
 		changes = append(changes, FileChange{
 			Path:     abs,
@@ -44,8 +51,14 @@ func GeneratePatchedContents(diffs []DiffBlock, resolver *PathResolver, extensio
 	return changes, failed, nil
 }
 
-func CorrectDiff(diff DiffBlock, resolver *PathResolver, extensions []string) (string, error) {
-	src := resolver.ResolveExisting(diff.FilePath)
+func CorrectDiff(diff DiffBlock, resolver *PathResolver, extensions []string, sourcePath string) (string, error) {
+	src := ""
+	if sourcePath != "" {
+		if _, err := os.Stat(sourcePath); err == nil {
+			src = sourcePath
+		}
+	}
+
 	var lines []string
 	if src != "" {
 		if content, err := os.ReadFile(src); err == nil {
@@ -55,10 +68,10 @@ func CorrectDiff(diff DiffBlock, resolver *PathResolver, extensions []string) (s
 	return correctDiffHunks(lines, diff.RawContent, diff.FilePath)
 }
 
-func applyPatch(path, patch string, resolver *PathResolver) []string {
+func applyPatch(sourcePath, patch string, resolver *PathResolver) []string {
 	var sourceLines []string
-	srcPath := resolver.ResolveExisting(path)
-	if srcPath != "" {
+	if sourcePath != "" {
+		srcPath := sourcePath
 		if content, err := os.ReadFile(srcPath); err == nil {
 			if len(content) > 0 {
 				sourceLines = strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
