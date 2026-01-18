@@ -86,6 +86,9 @@ func applyUnifiedDiff(source []string, patch string) []string {
 
 		rangePart := strings.TrimPrefix(parts[1], "-")
 		rangeSplit := strings.Split(rangePart, ",")
+		if len(rangeSplit) == 0 || rangeSplit[0] == "" {
+			continue
+		}
 		start, _ := strconv.Atoi(rangeSplit[0])
 
 		startIdx := start - 1

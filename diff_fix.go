@@ -5,17 +5,22 @@ import (
 	"strings"
 )
 
-func getTargetBlock(diff []string) []string {
+func getTargetBlock(diff []string) ([]string, int) {
 	var block []string
-	for _, line := range diff {
+	firstNonEmptyOffset := -1
+	for i, line := range diff {
 		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
 			content := line[1:]
-			if strings.TrimSpace(content) != "" {
+			trimmed := strings.TrimSpace(content)
+			if trimmed != "" {
+				if firstNonEmptyOffset == -1 {
+					firstNonEmptyOffset = i
+				}
 				block = append(block, content)
 			}
 		}
 	}
-	return block
+	return block, firstNonEmptyOffset
 }
 
 func normalizeLineForMatching(line string) string {
@@ -97,9 +102,14 @@ func correctDiffHunks(sourceLines []string, raw, path string) (string, error) {
 	cp = append(cp, fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
 	offset, last := 0, 0
 	for _, h := range hunks {
-		os, me := matchBlock(sourceLines, getTargetBlock(h), last+1)
+		target, firstOffset := getTargetBlock(h)
+		os, me := matchBlock(sourceLines, target, last+1)
 		if os == -1 {
 			return "", fmt.Errorf("failed match")
+		}
+
+		if firstOffset != -1 {
+			os -= firstOffset
 		}
 		last = me
 
