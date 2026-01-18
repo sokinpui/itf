@@ -24,7 +24,7 @@ func normalizeLineForMatching(line string) string {
 
 func matchBlock(source, block []string, startLine int) (int, int) {
 	if len(block) == 0 {
-		return -1, -1
+		return len(source) + 1, len(source)
 	}
 
 	nb := make([]string, len(block))
