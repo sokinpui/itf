@@ -9,7 +9,6 @@ import (
 )
 
 type Config struct {
-	OutputTool    bool
 	OutputDiffFix bool
 	Undo          bool
 	Redo          bool
@@ -63,8 +62,6 @@ func (a *App) Execute() (summary Summary, err error) {
 		return a.undoLastOperation()
 	case a.cfg.Redo:
 		return a.redoLastOperation()
-	case a.cfg.OutputTool:
-		return a.printTools()
 	case a.cfg.OutputDiffFix:
 		return a.fixAndPrintDiffs()
 	default:
@@ -218,15 +215,6 @@ func (a *App) fixAndPrintDiffs() (Summary, error) {
 		if res, err := CorrectDiff(d, a.pathResolver, a.cfg.Extensions, a.pathResolver.ResolveExisting(d.FilePath)); err == nil {
 			fmt.Print(res)
 		}
-	}
-	return Summary{}, nil
-}
-
-func (a *App) printTools() (Summary, error) {
-	c, _ := a.sourceProvider.GetContent()
-	tools, _ := ExtractToolBlocks(c)
-	for _, t := range tools {
-		fmt.Println(t.Content)
 	}
 	return Summary{}, nil
 }

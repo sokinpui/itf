@@ -8,7 +8,6 @@ import (
 )
 
 type CLIConfig struct {
-	OutputTool    bool
 	OutputDiffFix bool
 	Undo          bool
 	Redo          bool
@@ -38,7 +37,6 @@ Example: pbpaste | itf -e py`,
 		normalizeExtensions()
 
 		itfCfg := &Config{
-			OutputTool:    cfg.OutputTool,
 			OutputDiffFix: cfg.OutputDiffFix,
 			Undo:          cfg.Undo,
 			Redo:          cfg.Redo,
@@ -51,7 +49,7 @@ Example: pbpaste | itf -e py`,
 			return fmt.Errorf("failed to initialize application: %w", err)
 		}
 
-		if cfg.OutputDiffFix || cfg.OutputTool {
+		if cfg.OutputDiffFix {
 			_, err := app.Execute()
 			return err
 		}
@@ -86,7 +84,6 @@ func normalizeExtensions() {
 
 func init() {
 	rootCmd.Flags().StringVar(&cfg.Completion, "completion", "", "Generate completion script")
-	rootCmd.Flags().BoolVarP(&cfg.OutputTool, "output-tool", "t", false, "Print tool blocks")
 	rootCmd.Flags().BoolVarP(&cfg.OutputDiffFix, "output-diff-fix", "o", false, "Print corrected diff")
 	rootCmd.Flags().BoolVar(&cfg.NoAnimation, "no-animation", false, "Disable spinner")
 	rootCmd.Flags().StringSliceVarP(&cfg.Extensions, "extension", "e", []string{}, "Filter by extension")

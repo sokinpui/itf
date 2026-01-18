@@ -12,10 +12,6 @@ type DiffBlock struct {
 	RawContent string
 }
 
-type ToolBlock struct {
-	Content string
-}
-
 type FileRename struct {
 	OldPath string
 	NewPath string

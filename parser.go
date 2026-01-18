@@ -93,7 +93,7 @@ func CreatePlan(content string, resolver *PathResolver, extensions []string, fil
 func parseFileBlocks(blocks []CodeBlock, resolver *PathResolver, extensions []string, allowed map[string]struct{}) []FileChange {
 	var result []FileChange
 	for _, b := range blocks {
-		if b.Lang == "diff" || b.Lang == "tool" || b.Lang == "delete" || b.Lang == "rename" {
+		if b.Lang == "diff" || b.Lang == "delete" || b.Lang == "rename" {
 			continue
 		}
 		path := ExtractPathFromHint(b.Hint)
@@ -154,20 +154,6 @@ func extractDiffBlocksFromParsed(blocks []CodeBlock, resolver *PathResolver, all
 		diffs = append(diffs, DiffBlock{FilePath: path, RawContent: raw})
 	}
 	return diffs
-}
-
-func ExtractToolBlocks(content string) ([]ToolBlock, error) {
-	blocks, err := ExtractCodeBlocks([]byte(content))
-	if err != nil {
-		return nil, err
-	}
-	var tools []ToolBlock
-	for _, b := range blocks {
-		if b.Lang == "tool" {
-			tools = append(tools, ToolBlock{Content: strings.TrimSpace(b.Content)})
-		}
-	}
-	return tools, nil
 }
 
 func ExtractPathFromHint(hint string) string {

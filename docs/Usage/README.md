@@ -100,7 +100,6 @@ config.yaml config.yml
 | `--extension`       | `-e`      | Filter by file extension (e.g., `-e go -e js`). Use `-e diff` for diff-only mode. |
 | `--undo`            | `-u`      | Undo the last operation.                                                          |
 | `--redo`            | `-r`      | Redo the last undone operation.                                                   |
-| `--output-tool`     | `-t`      | Print the content of `tool` blocks instead of applying changes.                   |
 | `--output-diff-fix` | `-o`      | Print a corrected version of the diffs found in the input.                        |
 | `--no-animation`    |           | Disable the loading spinner and progress updates.                                 |
 | `--completion`      |           | Generate a shell completion script (e.g., `bash`, `zsh`).                         |
