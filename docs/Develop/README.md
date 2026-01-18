@@ -25,7 +25,6 @@ The project is organized into several packages:
 1.  **Prerequisites**:
     -   Go 1.21 or later.
     -   Neovim (for running the application).
-    -   `patch` command-line tool.
 
 2.  **Clone the repository**:
     ```bash

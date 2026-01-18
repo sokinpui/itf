@@ -1,11 +1,10 @@
 package itf
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -33,11 +32,7 @@ func GeneratePatchedContents(diffs []DiffBlock, resolver *PathResolver, extensio
 			continue
 		}
 
-		applied, err := applyPatch(d.FilePath, patched, resolver)
-		if err != nil {
-			failed = append(failed, abs)
-			continue
-		}
+		applied := applyPatch(d.FilePath, patched, resolver)
 
 		changes = append(changes, FileChange{
 			Path:     abs,
@@ -60,22 +55,73 @@ func CorrectDiff(diff DiffBlock, resolver *PathResolver, extensions []string) (s
 	return correctDiffHunks(lines, diff.RawContent, diff.FilePath)
 }
 
-func applyPatch(path, patch string, resolver *PathResolver) ([]string, error) {
-	src := resolver.ResolveExisting(path)
-	if src == "" {
-		tmp, _ := os.CreateTemp("", "itf-")
-		src = tmp.Name()
-		defer os.Remove(src)
-		tmp.Close()
+func applyPatch(path, patch string, resolver *PathResolver) []string {
+	var sourceLines []string
+	srcPath := resolver.ResolveExisting(path)
+	if srcPath != "" {
+		if content, err := os.ReadFile(srcPath); err == nil {
+			if len(content) > 0 {
+				sourceLines = strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+			}
+		}
+	}
+	return applyUnifiedDiff(sourceLines, patch)
+}
+
+func applyUnifiedDiff(source []string, patch string) []string {
+	patchLines := strings.Split(patch, "\n")
+	var result []string
+	srcIdx := 0
+
+	for i := 0; i < len(patchLines); i++ {
+		line := patchLines[i]
+		if !strings.HasPrefix(line, "@@ -") {
+			continue
+		}
+
+		parts := strings.Split(line, " ")
+		if len(parts) < 2 {
+			continue
+		}
+
+		rangePart := strings.TrimPrefix(parts[1], "-")
+		rangeSplit := strings.Split(rangePart, ",")
+		start, _ := strconv.Atoi(rangeSplit[0])
+
+		startIdx := start - 1
+		if startIdx < 0 {
+			startIdx = 0
+		}
+
+		for srcIdx < startIdx && srcIdx < len(source) {
+			result = append(result, source[srcIdx])
+			srcIdx++
+		}
+
+		i++
+		for i < len(patchLines) {
+			hunkLine := patchLines[i]
+			if strings.HasPrefix(hunkLine, "@@") || strings.HasPrefix(hunkLine, "---") || strings.HasPrefix(hunkLine, "+++") {
+				i--
+				break
+			}
+
+			if strings.HasPrefix(hunkLine, "+") {
+				result = append(result, hunkLine[1:])
+			} else if strings.HasPrefix(hunkLine, "-") {
+				srcIdx++
+			} else if strings.HasPrefix(hunkLine, " ") {
+				result = append(result, hunkLine[1:])
+				srcIdx++
+			}
+			i++
+		}
 	}
 
-	cmd := exec.Command("patch", "-s", "-p1", "--no-backup-if-mismatch", "-r", "/dev/null", "-o", "-", src)
-	cmd.Stdin = strings.NewReader(patch)
-	var out, serr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &serr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("patch failed: %s", serr.String())
+	for srcIdx < len(source) {
+		result = append(result, source[srcIdx])
+		srcIdx++
 	}
-	return strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n"), nil
+
+	return result
 }
