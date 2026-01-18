@@ -230,10 +230,11 @@ func (m *StateManager) CreateOperations(updated []string, actions map[string]str
 		action := actions[f]
 		checkPath, newPath := f, ""
 		
-		if action == "rename" {
+		switch action {
+		case "rename":
 			newPath = rm[f]
 			checkPath = newPath
-		} else if action == "delete" {
+		case "delete":
 			rel, _ := filepath.Rel(".", f)
 			checkPath = filepath.Join(m.StateDir, TrashDir, rel)
 		}

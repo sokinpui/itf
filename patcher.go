@@ -39,7 +39,7 @@ func GeneratePatchedContents(diffs []DiffBlock, resolver *PathResolver, extensio
 			continue
 		}
 
-		applied := applyPatch(sourcePath, patched, resolver)
+		applied := applyPatch(sourcePath, patched)
 
 		changes = append(changes, FileChange{
 			Path:     abs,
@@ -68,7 +68,7 @@ func CorrectDiff(diff DiffBlock, resolver *PathResolver, extensions []string, so
 	return correctDiffHunks(lines, diff.RawContent, diff.FilePath)
 }
 
-func applyPatch(sourcePath, patch string, resolver *PathResolver) []string {
+func applyPatch(sourcePath, patch string) []string {
 	var sourceLines []string
 	if sourcePath != "" {
 		srcPath := sourcePath
@@ -104,10 +104,7 @@ func applyUnifiedDiff(source []string, patch string) []string {
 		}
 		start, _ := strconv.Atoi(rangeSplit[0])
 
-		startIdx := start - 1
-		if startIdx < 0 {
-			startIdx = 0
-		}
+		startIdx := max(0, start-1)
 
 		for srcIdx < startIdx && srcIdx < len(source) {
 			result = append(result, source[srcIdx])

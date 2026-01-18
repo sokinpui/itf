@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -72,7 +73,7 @@ func CreatePlan(content string, resolver *PathResolver, extensions []string, fil
 				continue
 			}
 
-			applied := applyPatch(sourcePath, patched, resolver)
+			applied := applyPatch(sourcePath, patched)
 			actions = append(actions, PlannedAction{
 				Type: "write",
 				Change: &FileChange{
@@ -96,11 +97,11 @@ func CreatePlan(content string, resolver *PathResolver, extensions []string, fil
 	targetPaths := collectTargetPaths(actions)
 	fileActions, dirs := GetFileActionsAndDirs(targetPaths, renameDestSet)
 	
-	// Ensure delete/rename labels are correctly set in the map
 	for _, a := range actions {
-		if a.Type == "delete" {
+		switch a.Type {
+		case "delete":
 			fileActions[a.Path] = "delete"
-		} else if a.Type == "rename" {
+		case "rename":
 			fileActions[a.Rename.OldPath] = "rename"
 		}
 	}
@@ -184,18 +185,12 @@ func HasAllowedExtension(path string, extensions []string) bool {
 	if len(extensions) == 0 {
 		return true
 	}
-	ext := filepath.Ext(path)
-	for _, e := range extensions {
-		if ext == e {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(extensions, filepath.Ext(path))
 }
 
 func parseDeleteBlock(b CodeBlock, resolver *PathResolver, allowed map[string]struct{}) []string {
 	var paths []string
-	for _, line := range strings.Split(b.Content, "\n") {
+	for line := range strings.SplitSeq(b.Content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
@@ -211,7 +206,7 @@ func parseDeleteBlock(b CodeBlock, resolver *PathResolver, allowed map[string]st
 
 func parseRenameBlock(b CodeBlock, resolver *PathResolver, allowed map[string]struct{}) []FileRename {
 	var renames []FileRename
-	for _, line := range strings.Split(b.Content, "\n") {
+	for line := range strings.SplitSeq(b.Content, "\n") {
 		parts := strings.Fields(strings.TrimSpace(line))
 		if len(parts) != 2 {
 			continue
