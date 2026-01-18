@@ -2,16 +2,13 @@ package itf
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 type ExecutionPlan struct {
-	Changes      []FileChange
-	Deletes      []string
-	Renames      []FileRename
+	Actions      []PlannedAction
 	FileActions  map[string]string
 	DirsToCreate map[string]struct{}
 	Failed       []string
@@ -30,100 +27,117 @@ func CreatePlan(content string, resolver *PathResolver, extensions []string, fil
 		return nil, err
 	}
 
-	isDiffOnly := len(extensions) == 1 && extensions[0] == ".diff"
-	var fileBlocks []FileChange
-	if !isDiffOnly {
-		fileBlocks = parseFileBlocks(allBlocks, resolver, extensions, allowedFiles)
-	}
-
-	renames := parseRenameBlocks(allBlocks, resolver, allowedFiles)
-	renameDestToSource := make(map[string]string)
+	var actions []PlannedAction
+	var failed []string
+	
+	// Track renames as we go to resolve diff sources correctly
 	renameDestSet := make(map[string]struct{})
-	for _, r := range renames {
-		renameDestToSource[r.NewPath] = r.OldPath
-		renameDestSet[r.NewPath] = struct{}{}
-	}
+	renameDestToSource := make(map[string]string)
 
-	diffBlocks := extractDiffBlocksFromParsed(allBlocks, resolver, allowedFiles)
-	deletePaths := parseDeletePaths(allBlocks, resolver, allowedFiles)
-	patchedChanges, failedPatches, err := GeneratePatchedContents(diffBlocks, resolver, extensions, renameDestToSource)
-	if err != nil {
-		return nil, err
-	}
-
-	finalChanges := make(map[string]FileChange)
-	for _, c := range patchedChanges {
-		finalChanges[c.Path] = c
-	}
-	for _, b := range fileBlocks {
-		finalChanges[b.Path] = b
-	}
-
-	planChanges := make([]FileChange, 0, len(finalChanges))
-	targetPaths := make([]string, 0, len(finalChanges))
-	for _, c := range finalChanges {
-		planChanges = append(planChanges, c)
-		targetPaths = append(targetPaths, c.Path)
-	}
-
-	actions, dirs := GetFileActionsAndDirs(targetPaths, renameDestSet)
-	for _, p := range deletePaths {
-		actions[p] = "delete"
-	}
-	for _, r := range renames {
-		actions[r.OldPath] = "rename"
-		dir := filepath.Dir(r.NewPath)
-		if dir != "." && dir != "/" {
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				dirs[dir] = struct{}{}
+	for _, b := range allBlocks {
+		switch b.Lang {
+		case "rename":
+			parsed := parseRenameBlock(b, resolver, allowedFiles)
+			for _, r := range parsed {
+				actions = append(actions, PlannedAction{Type: "rename", Rename: &r})
+				renameDestSet[r.NewPath] = struct{}{}
+				renameDestToSource[r.NewPath] = r.OldPath
 			}
+		case "delete":
+			paths := parseDeleteBlock(b, resolver, allowedFiles)
+			for _, p := range paths {
+				actions = append(actions, PlannedAction{Type: "delete", Path: p})
+			}
+		case "diff":
+			raw := strings.Trim(b.Content, "\n")
+			path := ExtractPathFromDiff(raw)
+			if path == "" || !isAllowed(resolver.Resolve(path), allowedFiles) {
+				continue
+			}
+			
+			d := DiffBlock{FilePath: path, RawContent: raw}
+			abs := resolver.Resolve(d.FilePath)
+			sourcePath := abs
+			if s, ok := renameDestToSource[abs]; ok {
+				sourcePath = s
+			}
+
+			if len(extensions) > 0 && !HasAllowedExtension(d.FilePath, extensions) {
+				continue
+			}
+
+			patched, err := CorrectDiff(d, resolver, extensions, sourcePath)
+			if err != nil {
+				failed = append(failed, abs)
+				continue
+			}
+
+			applied := applyPatch(sourcePath, patched, resolver)
+			actions = append(actions, PlannedAction{
+				Type: "write",
+				Change: &FileChange{
+					Path:     abs,
+					Content:  applied,
+					Source:   "diff",
+					RawBlock: fmt.Sprintf("```diff\n%s\n```", d.RawContent),
+				},
+			})
+		default:
+			if len(extensions) == 1 && extensions[0] == ".diff" {
+				continue
+			}
+			change := parseFileBlock(b, resolver, extensions, allowedFiles)
+			if change != nil {
+				actions = append(actions, PlannedAction{Type: "write", Change: change})
+			}
+		}
+	}
+
+	targetPaths := collectTargetPaths(actions)
+	fileActions, dirs := GetFileActionsAndDirs(targetPaths, renameDestSet)
+	
+	// Ensure delete/rename labels are correctly set in the map
+	for _, a := range actions {
+		if a.Type == "delete" {
+			fileActions[a.Path] = "delete"
+		} else if a.Type == "rename" {
+			fileActions[a.Rename.OldPath] = "rename"
 		}
 	}
 
 	return &ExecutionPlan{
-		Changes:      planChanges,
-		Deletes:      deletePaths,
-		Renames:      renames,
-		FileActions:  actions,
+		Actions:      actions,
+		FileActions:  fileActions,
 		DirsToCreate: dirs,
-		Failed:       failedPatches,
+		Failed:       failed,
 	}, nil
 }
 
-func parseFileBlocks(blocks []CodeBlock, resolver *PathResolver, extensions []string, allowed map[string]struct{}) []FileChange {
-	var result []FileChange
-	for _, b := range blocks {
-		if b.Lang == "diff" || b.Lang == "delete" || b.Lang == "rename" {
-			continue
-		}
-		path := ExtractPathFromHint(b.Hint)
-		if path == "" {
-			continue
-		}
-		abs := resolver.Resolve(path)
-		if len(allowed) > 0 {
-			if _, ok := allowed[abs]; !ok {
-				continue
-			}
-		}
-		if !HasAllowedExtension(path, extensions) {
-			continue
-		}
-
-		trimmed := strings.TrimRight(b.Content, "\n")
-		lines := strings.Split(trimmed, "\n")
-		if len(lines) == 1 && lines[0] == "" {
-			lines = []string{}
-		}
-
-		result = append(result, FileChange{
-			Path:     abs,
-			Content:  lines,
-			Source:   "codeblock",
-			RawBlock: fmt.Sprintf("```%s\n%s\n```", b.Lang, trimmed),
-		})
+func parseFileBlock(b CodeBlock, resolver *PathResolver, extensions []string, allowed map[string]struct{}) *FileChange {
+	path := ExtractPathFromHint(b.Hint)
+	if path == "" {
+		return nil
 	}
-	return result
+	abs := resolver.Resolve(path)
+	if !isAllowed(abs, allowed) {
+		return nil
+	}
+	if !HasAllowedExtension(path, extensions) {
+		return nil
+	}
+
+	trimmed := strings.TrimRight(b.Content, "\n")
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = []string{}
+	}
+
+	return &FileChange{
+		Path:     abs,
+		Content:  lines,
+		Source:   "codeblock",
+		RawBlock: fmt.Sprintf("```%s\n%s\n```", b.Lang, trimmed),
+	}
 }
 
 func ExtractDiffBlocks(content string, resolver *PathResolver, files []string) []DiffBlock {
@@ -179,50 +193,69 @@ func HasAllowedExtension(path string, extensions []string) bool {
 	return false
 }
 
-func parseDeletePaths(blocks []CodeBlock, resolver *PathResolver, allowed map[string]struct{}) []string {
+func parseDeleteBlock(b CodeBlock, resolver *PathResolver, allowed map[string]struct{}) []string {
 	var paths []string
-	for _, b := range blocks {
-		if b.Lang != "delete" {
+	for _, line := range strings.Split(b.Content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			continue
 		}
-		for _, line := range strings.Split(b.Content, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
-				continue
-			}
-			abs := resolver.Resolve(trimmed)
-			if len(allowed) > 0 {
-				if _, ok := allowed[abs]; !ok {
-					continue
-				}
-			}
-			paths = append(paths, abs)
+		abs := resolver.Resolve(trimmed)
+		if !isAllowed(abs, allowed) {
+			continue
 		}
+		paths = append(paths, abs)
 	}
 	return paths
 }
 
-func parseRenameBlocks(blocks []CodeBlock, resolver *PathResolver, allowed map[string]struct{}) []FileRename {
+func parseRenameBlock(b CodeBlock, resolver *PathResolver, allowed map[string]struct{}) []FileRename {
 	var renames []FileRename
-	for _, b := range blocks {
-		if b.Lang != "rename" {
+	for _, line := range strings.Split(b.Content, "\n") {
+		parts := strings.Fields(strings.TrimSpace(line))
+		if len(parts) != 2 {
 			continue
 		}
-		for _, line := range strings.Split(b.Content, "\n") {
-			parts := strings.Fields(strings.TrimSpace(line))
-			if len(parts) != 2 {
+		oldAbs, newAbs := resolver.Resolve(parts[0]), resolver.Resolve(parts[1])
+		if len(allowed) > 0 {
+			_, ok1 := allowed[oldAbs]
+			_, ok2 := allowed[newAbs]
+			if !ok1 && !ok2 {
 				continue
 			}
-			oldAbs, newAbs := resolver.Resolve(parts[0]), resolver.Resolve(parts[1])
-			if len(allowed) > 0 {
-				_, ok1 := allowed[oldAbs]
-				_, ok2 := allowed[newAbs]
-				if !ok1 && !ok2 {
-					continue
-				}
-			}
-			renames = append(renames, FileRename{OldPath: oldAbs, NewPath: newAbs})
 		}
+		renames = append(renames, FileRename{OldPath: oldAbs, NewPath: newAbs})
 	}
 	return renames
+}
+
+func isAllowed(path string, allowed map[string]struct{}) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[path]
+	return ok
+}
+
+func collectTargetPaths(actions []PlannedAction) []string {
+	var paths []string
+	seen := make(map[string]struct{})
+	for _, a := range actions {
+		p := ""
+		switch a.Type {
+		case "write":
+			p = a.Change.Path
+		case "rename":
+			p = a.Rename.OldPath
+		case "delete":
+			p = a.Path
+		}
+		if p != "" {
+			if _, ok := seen[p]; !ok {
+				paths = append(paths, p)
+				seen[p] = struct{}{}
+			}
+		}
+	}
+	return paths
 }

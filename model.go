@@ -17,6 +17,13 @@ type FileRename struct {
 	NewPath string
 }
 
+type PlannedAction struct {
+	Type   string // "write", "rename", "delete"
+	Change *FileChange
+	Rename *FileRename
+	Path   string // For delete
+}
+
 type Summary struct {
 	Created  []string
 	Modified []string
