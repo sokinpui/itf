@@ -9,17 +9,10 @@ func getTargetBlock(diff []string) []string {
 	var block []string
 	for _, line := range diff {
 		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
-			content := line[1:]
-			if strings.TrimSpace(content) != "" {
-				block = append(block, content)
-			}
+			block = append(block, line[1:])
 		}
 	}
 	return block
-}
-
-func normalizeLineForMatching(line string) string {
-	return strings.Join(strings.Fields(line), " ")
 }
 
 func matchBlock(source, block []string, startLine int) (int, int) {
@@ -27,41 +20,21 @@ func matchBlock(source, block []string, startLine int) (int, int) {
 		return len(source) + 1, len(source)
 	}
 
-	nb := make([]string, len(block))
-	for i, l := range block {
-		nb[i] = normalizeLineForMatching(l)
+	startIdx := startLine - 1
+	if startIdx < 0 {
+		startIdx = 0
 	}
 
-	var fs []string
-	var ol []int
-	for i, l := range source {
-		nl := normalizeLineForMatching(l)
-		if nl != "" {
-			fs = append(fs, nl)
-			ol = append(ol, i+1)
-		}
-	}
-
-	si := 0
-	if startLine > 1 {
-		for i, ln := range ol {
-			if ln >= startLine {
-				si = i
-				break
-			}
-		}
-	}
-
-	for i := si; i <= len(fs)-len(nb); i++ {
+	for i := startIdx; i <= len(source)-len(block); i++ {
 		match := true
-		for j := 0; j < len(nb); j++ {
-			if fs[i+j] != nb[j] {
+		for j := 0; j < len(block); j++ {
+			if source[i+j] != block[j] {
 				match = false
 				break
 			}
 		}
 		if match {
-			return ol[i], ol[i+len(nb)-1]
+			return i + 1, i + len(block)
 		}
 	}
 	return -1, -1
