@@ -1,6 +1,7 @@
 package itf
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,9 +41,10 @@ type State struct {
 }
 
 type StateManager struct {
-	statePath string
-	state     *State
-	StateDir  string
+	statePath   string
+	state       *State
+	StateDir    string
+	ProjectRoot string
 }
 
 func findGitRoot() (string, error) {
@@ -60,56 +62,62 @@ func NewStateManager() (*StateManager, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-	m := &StateManager{statePath: filepath.Join(dir, stateFileName), StateDir: dir}
+	m := &StateManager{
+		statePath:   filepath.Join(dir, stateFileName),
+		StateDir:    dir,
+		ProjectRoot: root,
+	}
 	m.state = &State{CurrentIndex: -1, History: []HistoryEntry{}}
 	_ = m.load()
 	return m, nil
 }
 
 func (m *StateManager) load() error {
-	data, err := os.ReadFile(m.statePath)
+	file, err := os.Open(m.statePath)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	blocks := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), entrySeparator)
-	if len(blocks) == 0 {
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
 		return nil
 	}
 
-	idx, _ := strconv.Atoi(strings.TrimSpace(blocks[0]))
+	idx, _ := strconv.Atoi(strings.TrimSpace(scanner.Text()))
 	m.state = &State{CurrentIndex: idx, History: []HistoryEntry{}}
 
-	for _, b := range blocks[1:] {
-		entry := HistoryEntry{}
-		ops := strings.Split(strings.TrimSpace(b), opSeparator)
-		for _, opBlock := range ops {
-			lines := strings.Split(strings.TrimSpace(opBlock), "\n")
-			if len(lines) < 6 {
-				continue
-			}
-
-			val := func(s string) string {
-				s = strings.TrimSpace(s)
-				if s == none {
-					return ""
-				}
-				return s
-			}
-
-			op := Operation{
-				Timestamp:      parseTimestamp(lines[0]),
-				Action:         val(lines[1]),
-				Path:           val(lines[2]),
-				OldContentHash: val(lines[3]),
-				ContentHash:    val(lines[4]),
-				NewPath:        val(lines[5]),
-			}
-			entry.Operations = append(entry.Operations, op)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "===" {
+			m.state.History = append(m.state.History, HistoryEntry{})
+			continue
 		}
-		m.state.History = append(m.state.History, entry)
+
+		if line == "" || line == "---" || len(m.state.History) == 0 {
+			continue
+		}
+
+		entry := &m.state.History[len(m.state.History)-1]
+		op := Operation{Timestamp: parseTimestamp(line)}
+
+		fields := []*string{&op.Action, &op.Path, &op.OldContentHash, &op.ContentHash, &op.NewPath}
+		for _, f := range fields {
+			if !scanner.Scan() {
+				break
+			}
+			*f = strings.TrimSpace(scanner.Text())
+		}
+
+		op.Action = m.fromStoreValue(op.Action)
+		op.Path = m.resolvePath(op.Path)
+		op.OldContentHash = m.fromStoreValue(op.OldContentHash)
+		op.ContentHash = m.fromStoreValue(op.ContentHash)
+		op.NewPath = m.resolvePath(op.NewPath)
+
+		entry.Operations = append(entry.Operations, op)
 	}
-	return nil
+	return scanner.Err()
 }
 
 func parseTimestamp(s string) int64 {
@@ -118,26 +126,67 @@ func parseTimestamp(s string) int64 {
 }
 
 func (m *StateManager) save() {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d", m.state.CurrentIndex)
+	file, err := os.Create(m.statePath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+	defer writer.Flush()
+
+	fmt.Fprintf(writer, "%d", m.state.CurrentIndex)
+
 	for _, e := range m.state.History {
-		b.WriteString(entrySeparator)
-
-		placeholder := func(s string) string {
-			if s == "" {
-				return none
-			}
-			return s
-		}
-
+		fmt.Fprint(writer, entrySeparator)
 		for i, op := range e.Operations {
-			fmt.Fprintf(&b, "%d\n%s\n%s\n%s\n%s\n%s", op.Timestamp, placeholder(op.Action), placeholder(op.Path), placeholder(op.OldContentHash), placeholder(op.ContentHash), placeholder(op.NewPath))
+			fmt.Fprintf(writer, "%d\n%s\n%s\n%s\n%s\n%s",
+				op.Timestamp,
+				m.toStoreValue(op.Action),
+				m.relativePath(op.Path),
+				m.toStoreValue(op.OldContentHash),
+				m.toStoreValue(op.ContentHash),
+				m.relativePath(op.NewPath),
+			)
 			if i < len(e.Operations)-1 {
-				b.WriteString(opSeparator)
+				fmt.Fprint(writer, opSeparator)
 			}
 		}
 	}
-	_ = os.WriteFile(m.statePath, []byte(b.String()), 0644)
+}
+
+func (m *StateManager) fromStoreValue(s string) string {
+	if s == none {
+		return ""
+	}
+	return s
+}
+
+func (m *StateManager) toStoreValue(s string) string {
+	if s == "" {
+		return none
+	}
+	return s
+}
+
+func (m *StateManager) relativePath(p string) string {
+	if p == "" {
+		return none
+	}
+	if rel, err := filepath.Rel(m.ProjectRoot, p); err == nil {
+		return rel
+	}
+	return p
+}
+
+func (m *StateManager) resolvePath(p string) string {
+	if p == "" || p == none {
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(m.ProjectRoot, p)
 }
 
 func (m *StateManager) Sync() {
@@ -235,7 +284,7 @@ func (m *StateManager) CreateOperations(updated []string, actions map[string]str
 			newPath = rm[f]
 			checkPath = newPath
 		case "delete":
-			rel, _ := filepath.Rel(".", f)
+			rel, _ := filepath.Rel(m.ProjectRoot, f)
 			checkPath = filepath.Join(m.StateDir, TrashDir, rel)
 		}
 
