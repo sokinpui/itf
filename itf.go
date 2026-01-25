@@ -39,10 +39,16 @@ func NewApp(cfg *Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	pr, err := NewPathResolver()
+	if err != nil {
+		return nil, err
+	}
+
 	return &App{
 		cfg:            cfg,
 		stateManager:   sm,
-		pathResolver:   NewPathResolver(),
+		pathResolver:   pr,
 		sourceProvider: NewSourceProvider(),
 		fileManager:    NewFileManager(),
 	}, nil

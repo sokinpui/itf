@@ -48,8 +48,12 @@ type StateManager struct {
 }
 
 func findGitRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		return os.Getwd()
+	}
+
+	out, err := exec.Command(gitPath, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return os.Getwd()
 	}

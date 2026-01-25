@@ -43,12 +43,12 @@ type PathResolver struct {
 	wd string
 }
 
-func NewPathResolver() *PathResolver {
+func NewPathResolver() (*PathResolver, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		panic(fmt.Sprintf("could not get current working directory: %v", err))
+		return nil, fmt.Errorf("could not get current working directory: %w", err)
 	}
-	return &PathResolver{wd: wd}
+	return &PathResolver{wd: wd}, nil
 }
 
 func (r *PathResolver) Resolve(relativePath string) string {
