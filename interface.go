@@ -21,5 +21,26 @@ func Apply(content string, config Config) (map[string][]string, error) {
 		"Renamed":  summary.Renamed,
 		"Deleted":  summary.Deleted,
 		"Failed":   summary.Failed,
+		"Message":  []string{summary.Message},
 	}, nil
+}
+
+func FormatResult(results map[string][]string) string {
+	if results == nil {
+		return ""
+	}
+
+	msg := ""
+	if m, ok := results["Message"]; ok && len(m) > 0 {
+		msg = m[0]
+	}
+
+	return FormatSummary(Summary{
+		Created:  results["Created"],
+		Modified: results["Modified"],
+		Renamed:  results["Renamed"],
+		Deleted:  results["Deleted"],
+		Failed:   results["Failed"],
+		Message:  msg,
+	})
 }

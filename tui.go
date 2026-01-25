@@ -43,7 +43,7 @@ func (t *TUI) Run() error {
 	if t.noAnimation {
 		summary, err := t.app.Execute()
 		if err == nil {
-			fmt.Print(t.renderSummary(summary))
+			fmt.Print(FormatSummary(summary))
 		}
 		return err
 	}
@@ -72,7 +72,7 @@ func (t *TUI) Run() error {
 	fmt.Print("\r\x1b[K")
 
 	if err == nil {
-		fmt.Print(t.renderSummary(summary))
+		fmt.Print(FormatSummary(summary))
 	}
 	return err
 }
@@ -83,7 +83,7 @@ func (t *TUI) renderProgress() {
 	fmt.Printf("\r%s Processing... %d/%d\x1b[K", t.spinner.View(), t.cur, t.total)
 }
 
-func (t *TUI) renderSummary(s Summary) string {
+func FormatSummary(s Summary) string {
 	var b strings.Builder
 	if s.Message != "" {
 		b.WriteString(headerStyle.Render(s.Message) + "\n\n")
