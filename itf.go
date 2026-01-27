@@ -88,7 +88,7 @@ func (a *App) processAndApply(content string) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
-	if len(plan.Actions) == 0 {
+	if len(plan.Actions) == 0 && len(plan.Failed) == 0 {
 		return Summary{Message: "Nothing to do"}, nil
 	}
 
@@ -168,6 +168,7 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		append(failedCreate, failedModify...),
 		failedDeletes,
 		failedRenames,
+		plan.Failed,
 	)
 }
 
@@ -214,18 +215,19 @@ func (a *App) reportProgress(current, total int) {
 	}
 }
 
-func (a *App) createSummary(created, modified, deleted []string, renamed map[string]string, failedNvim, failedDeletes, failedRenames []string) (Summary, error) {
+func (a *App) createSummary(created, modified, deleted []string, renamed map[string]string, failedWrites, failedDeletes, failedRenames, failedPlan []string) (Summary, error) {
 	var renamedPaths []string
 	for oldPath, newPath := range renamed {
 		renamedPaths = append(renamedPaths, fmt.Sprintf("%s -> %s", oldPath, newPath))
 	}
 
+	allFailed := append(failedWrites, append(failedDeletes, append(failedRenames, failedPlan...)...)...)
 	s := Summary{
 		Created:  created,
 		Modified: modified,
 		Deleted:  deleted,
 		Renamed:  renamedPaths,
-		Failed:   append(failedNvim, append(failedDeletes, failedRenames...)...),
+		Failed:   allFailed,
 	}
 	a.relativizeSummaryPaths(&s)
 	return s, nil
