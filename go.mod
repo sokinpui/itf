@@ -6,7 +6,6 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/spf13/cobra v1.10.2
-	github.com/yuin/goldmark v1.7.16
 )
 
 require (

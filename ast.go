@@ -1,12 +1,9 @@
 package itf
 
 import (
+	"bufio"
 	"bytes"
 	"strings"
-
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/text"
 )
 
 type CodeBlock struct {
@@ -17,45 +14,89 @@ type CodeBlock struct {
 
 func ExtractCodeBlocks(source []byte) ([]CodeBlock, error) {
 	var blocks []CodeBlock
-	parser := goldmark.DefaultParser()
-	root := parser.Parse(text.NewReader(source))
+	var currentBlock *CodeBlock
+	var fenceChar byte
+	var fenceCount int
+	var lastNonEmptyLine string
 
-	walker := func(node ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
-		}
+	scanner := bufio.NewScanner(bytes.NewReader(source))
+	for scanner.Scan() {
+		line := scanner.Text()
 
-		fencedCodeBlock, ok := node.(*ast.FencedCodeBlock)
-		if !ok {
-			return ast.WalkContinue, nil
-		}
-
-		var block CodeBlock
-		if fencedCodeBlock.Info != nil {
-			block.Lang = string(fencedCodeBlock.Info.Text(source))
-		}
-
-		var content bytes.Buffer
-		lines := fencedCodeBlock.Lines()
-		for i := 0; i < lines.Len(); i++ {
-			line := lines.At(i)
-			content.Write(line.Value(source))
-		}
-		block.Content = content.String()
-
-		if prev := fencedCodeBlock.PreviousSibling(); prev != nil {
-			if p, ok := prev.(*ast.Paragraph); ok {
-				block.Hint = strings.TrimSpace(string(p.Text(source)))
+		if currentBlock == nil {
+			char, count, ok := parseOpeningFence(line)
+			if ok {
+				fenceChar = char
+				fenceCount = count
+				currentBlock = &CodeBlock{
+					Lang: strings.TrimSpace(line[count:]),
+					Hint: lastNonEmptyLine,
+				}
+				continue
 			}
+
+			if trimmed := strings.TrimSpace(line); trimmed != "" {
+				lastNonEmptyLine = trimmed
+			}
+			continue
 		}
 
-		blocks = append(blocks, block)
-		return ast.WalkSkipChildren, nil
+		if isClosingFence(line, fenceChar, fenceCount) {
+			blocks = append(blocks, *currentBlock)
+			currentBlock = nil
+			lastNonEmptyLine = ""
+			continue
+		}
+
+		currentBlock.Content += line + "\n"
 	}
 
-	if err := ast.Walk(root, walker); err != nil {
+	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
+	if currentBlock != nil {
+		blocks = append(blocks, *currentBlock)
+	}
+
 	return blocks, nil
+}
+
+func parseOpeningFence(line string) (byte, int, bool) {
+	if len(line) < 3 {
+		return 0, 0, false
+	}
+
+	char := line[0]
+	if char != '`' && char != '~' {
+		return 0, 0, false
+	}
+
+	count := 0
+	for count < len(line) && line[count] == char {
+		count++
+	}
+
+	if count < 3 {
+		return 0, 0, false
+	}
+
+	return char, count, true
+}
+
+func isClosingFence(line string, char byte, count int) bool {
+	if len(line) < count {
+		return false
+	}
+
+	i := 0
+	for i < len(line) && line[i] == char {
+		i++
+	}
+
+	if i < count {
+		return false
+	}
+
+	return strings.TrimSpace(line[i:]) == ""
 }
