@@ -5,26 +5,25 @@ import (
 	"strings"
 )
 
-func getTargetBlock(diff []string) ([]string, int) {
-	var block []string
-	firstNonEmptyOffset := -1
+func getTargetBlock(diff []string) (block []string, deletedOnly []string, firstNonEmptyOffset int) {
+	firstNonEmptyOffset = -1
 	for i, line := range diff {
-		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
-			content := line[1:]
-			trimmed := strings.TrimSpace(content)
-			if trimmed != "" {
-				if firstNonEmptyOffset == -1 {
-					firstNonEmptyOffset = i
-				}
-				block = append(block, content)
-			}
+		if !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, " ") {
+			continue
+		}
+
+		content := line[1:]
+		block = append(block, content)
+
+		if strings.HasPrefix(line, "-") {
+			deletedOnly = append(deletedOnly, content)
+		}
+
+		if firstNonEmptyOffset == -1 && strings.TrimSpace(content) != "" {
+			firstNonEmptyOffset = i
 		}
 	}
-	return block, firstNonEmptyOffset
-}
-
-func normalizeLineForMatching(line string) string {
-	return strings.Join(strings.Fields(line), " ")
+	return block, deletedOnly, firstNonEmptyOffset
 }
 
 func matchBlock(source, block []string, startLine int) (int, int) {
@@ -32,44 +31,26 @@ func matchBlock(source, block []string, startLine int) (int, int) {
 		return len(source) + 1, len(source)
 	}
 
-	nb := make([]string, len(block))
-	for i, l := range block {
-		nb[i] = normalizeLineForMatching(l)
-	}
+	normalizedSource := normalizeLines(source)
+	normalizedBlock := normalizeLines(block)
+	startIndex := max(0, startLine-1)
 
-	var fs []string
-	var ol []int
-	for i, l := range source {
-		nl := normalizeLineForMatching(l)
-		if nl != "" {
-			fs = append(fs, nl)
-			ol = append(ol, i+1)
+	for i := startIndex; i <= len(normalizedSource)-len(normalizedBlock); i++ {
+		if isMatch(normalizedSource[i:i+len(normalizedBlock)], normalizedBlock) {
+			return i + 1, i + len(normalizedBlock)
 		}
 	}
 
-	si := 0
-	if startLine > 1 {
-		for i, ln := range ol {
-			if ln >= startLine {
-				si = i
-				break
-			}
-		}
-	}
-
-	for i := si; i <= len(fs)-len(nb); i++ {
-		match := true
-		for j := 0; j < len(nb); j++ {
-			if fs[i+j] != nb[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return ol[i], ol[i+len(nb)-1]
-		}
-	}
 	return -1, -1
+}
+
+func isMatch(source, target []string) bool {
+	for i := range target {
+		if source[i] != target[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func correctDiffHunks(sourceLines []string, raw, path string) (string, error) {
@@ -102,12 +83,22 @@ func correctDiffHunks(sourceLines []string, raw, path string) (string, error) {
 	cp = append(cp, fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
 	offset, last := 0, 0
 	for _, h := range hunks {
-		target, firstOffset := getTargetBlock(h)
-		os, me := matchBlock(sourceLines, target, last+1)
+		fullBlock, deletedOnly, firstOffset := getTargetBlock(h)
+
+		os, me := matchBlock(sourceLines, fullBlock, last+1)
+
+		if os == -1 {
+			// Fallback: try to match only the deleted lines if the LLM hallucinated context
+			os, me = matchBlock(sourceLines, deletedOnly, last+1)
+		}
+
 		if os == -1 {
 			return "", fmt.Errorf("failed match")
 		}
 
+		// Adjust offset based on where the first non-empty line was in the original hunk
+		// if we matched using fullBlock. If we matched deletedOnly, the logic is simpler
+		// but this heuristic covers most LLM-generated diff cases.
 		if firstOffset != -1 {
 			os -= firstOffset
 		}
@@ -121,7 +112,7 @@ func correctDiffHunks(sourceLines []string, raw, path string) (string, error) {
 				rc++
 			}
 		}
-		ol, nl := (len(h)-ac), (len(h)-rc)
+		ol, nl := (len(h) - ac), (len(h) - rc)
 		cp = append(cp, fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", os, ol, os+offset, nl))
 		for _, l := range h {
 			cp = append(cp, l+"\n")
@@ -129,4 +120,12 @@ func correctDiffHunks(sourceLines []string, raw, path string) (string, error) {
 		offset += nl - ol
 	}
 	return strings.Join(cp, ""), nil
+}
+
+func normalizeLines(lines []string) []string {
+	normalized := make([]string, len(lines))
+	for i, l := range lines {
+		normalized[i] = strings.TrimRight(l, " \t\r\n")
+	}
+	return normalized
 }
