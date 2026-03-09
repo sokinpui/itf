@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-func getTargetBlock(diff []string) (block []string, deletedOnly []string, firstNonEmptyOffset int) {
-	firstNonEmptyOffset = -1
-	for i, line := range diff {
+func getTargetBlock(diff []string) (block []string, deletedOnly []string, deletedOnlyOffset int) {
+	deletedOnlyOffset = -1
+	for _, line := range diff {
 		if !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, " ") {
 			continue
 		}
@@ -16,14 +16,13 @@ func getTargetBlock(diff []string) (block []string, deletedOnly []string, firstN
 		block = append(block, content)
 
 		if strings.HasPrefix(line, "-") {
+			if deletedOnlyOffset == -1 {
+				deletedOnlyOffset = len(block) - 1
+			}
 			deletedOnly = append(deletedOnly, content)
 		}
-
-		if firstNonEmptyOffset == -1 && strings.TrimSpace(content) != "" {
-			firstNonEmptyOffset = i
-		}
 	}
-	return block, deletedOnly, firstNonEmptyOffset
+	return block, deletedOnly, deletedOnlyOffset
 }
 
 func matchBlock(source, block []string, startLine int) (int, int) {
@@ -83,25 +82,23 @@ func correctDiffHunks(sourceLines []string, raw, path string) (string, error) {
 	cp = append(cp, fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
 	offset, last := 0, 0
 	for _, h := range hunks {
-		fullBlock, deletedOnly, firstOffset := getTargetBlock(h)
+		fullBlock, deletedOnly, deletedOnlyOffset := getTargetBlock(h)
 
 		os, me := matchBlock(sourceLines, fullBlock, last+1)
 
-		if os == -1 {
+		if os == -1 && len(deletedOnly) > 0 {
 			// Fallback: try to match only the deleted lines if the LLM hallucinated context
-			os, me = matchBlock(sourceLines, deletedOnly, last+1)
+			dos, dme := matchBlock(sourceLines, deletedOnly, last+1)
+			if dos != -1 {
+				os = dos - deletedOnlyOffset
+				me = dme + (len(fullBlock) - 1 - (deletedOnlyOffset + len(deletedOnly) - 1))
+			}
 		}
 
 		if os == -1 {
 			return "", fmt.Errorf("failed match")
 		}
 
-		// Adjust offset based on where the first non-empty line was in the original hunk
-		// if we matched using fullBlock. If we matched deletedOnly, the logic is simpler
-		// but this heuristic covers most LLM-generated diff cases.
-		if firstOffset != -1 {
-			os -= firstOffset
-		}
 		last = me
 
 		ac, rc := 0, 0
