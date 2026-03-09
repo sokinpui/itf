@@ -3,6 +3,7 @@ package itf
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
@@ -21,6 +22,7 @@ var cfg = &CLIConfig{}
 
 var rootCmd = &cobra.Command{
 	Use:   "itf",
+	Version: getVersion(),
 	Short: "Parse content from stdin or clipboard to update files.",
 	Long: `Parse content from stdin (pipe) or clipboard to update files in Neovim.
 
@@ -80,6 +82,15 @@ func normalizeExtensions() {
 			cfg.Extensions[i] = "." + ext
 		}
 	}
+}
+
+func getVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" {
+		return "devel"
+	}
+
+	return info.Main.Version
 }
 
 func init() {
