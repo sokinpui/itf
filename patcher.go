@@ -124,7 +124,9 @@ func applyUnifiedDiff(source []string, patch string) []string {
 			} else if strings.HasPrefix(hunkLine, "-") {
 				srcIdx++
 			} else if strings.HasPrefix(hunkLine, " ") {
-				result = append(result, hunkLine[1:])
+				if srcIdx < len(source) {
+					result = append(result, source[srcIdx])
+				}
 				srcIdx++
 			}
 			i++

@@ -111,8 +111,23 @@ func correctDiffHunks(sourceLines []string, raw, path string) (string, error) {
 		}
 		ol, nl := (len(h) - ac), (len(h) - rc)
 		cp = append(cp, fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", os, ol, os+offset, nl))
+
+		srcLineOffset := 0
 		for _, l := range h {
-			cp = append(cp, l+"\n")
+			if strings.HasPrefix(l, " ") {
+				lineIdx := os + srcLineOffset - 1
+				if lineIdx >= 0 && lineIdx < len(sourceLines) {
+					cp = append(cp, " "+sourceLines[lineIdx]+"\n")
+				} else {
+					cp = append(cp, l+"\n")
+				}
+				srcLineOffset++
+			} else if strings.HasPrefix(l, "-") {
+				cp = append(cp, l+"\n")
+				srcLineOffset++
+			} else {
+				cp = append(cp, l+"\n")
+			}
 		}
 		offset += nl - ol
 	}
