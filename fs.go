@@ -72,17 +72,23 @@ func GetFileActionsAndDirs(targetPaths []string, renameDestinations map[string]s
 
 	for _, path := range targetPaths {
 		_, isRenameDest := renameDestinations[path]
-		if _, err := os.Stat(path); os.IsNotExist(err) && !isRenameDest {
-			fileActions[path] = "create"
-			dir := filepath.Dir(path)
-			if dir != "." && dir != "/" {
-				if _, err := os.Stat(dir); os.IsNotExist(err) {
-					dirsToCreate[dir] = struct{}{}
-				}
+		_, err := os.Stat(path)
+		exists := !os.IsNotExist(err)
+
+		if !isRenameDest {
+			if exists {
+				fileActions[path] = "modify"
+			} else {
+				fileActions[path] = "create"
 			}
-			continue
 		}
-		fileActions[path] = "modify"
+
+		dir := filepath.Dir(path)
+		if dir != "." && dir != "/" {
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				dirsToCreate[dir] = struct{}{}
+			}
+		}
 	}
 	return fileActions, dirsToCreate
 }

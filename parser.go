@@ -241,7 +241,11 @@ func collectTargetPaths(actions []PlannedAction) []string {
 		case "write":
 			p = a.Change.Path
 		case "rename":
-			p = a.Rename.OldPath
+			if _, ok := seen[a.Rename.OldPath]; !ok {
+				paths = append(paths, a.Rename.OldPath)
+				seen[a.Rename.OldPath] = struct{}{}
+			}
+			p = a.Rename.NewPath
 		case "delete":
 			p = a.Path
 		}
