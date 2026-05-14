@@ -3,7 +3,6 @@ package itf
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -14,8 +13,6 @@ type ExecutionPlan struct {
 	DirsToCreate map[string]struct{}
 	Failed       []string
 }
-
-var pathInHintRegex = regexp.MustCompile("^`([^`\n]+)`")
 
 func CreatePlan(content string, resolver *PathResolver, extensions []string, files []string) (*ExecutionPlan, error) {
 	allowedFiles := make(map[string]struct{})
@@ -172,11 +169,14 @@ func extractDiffBlocksFromParsed(blocks []CodeBlock, resolver *PathResolver, all
 }
 
 func ExtractPathFromHint(hint string) string {
-	if match := pathInHintRegex.FindStringSubmatch(strings.TrimSpace(hint)); len(match) > 1 {
-		path := strings.TrimSpace(match[1])
-		if !strings.Contains(path, " ") {
-			return path
-		}
+	hint = strings.TrimSpace(hint)
+	hint = strings.TrimLeft(hint, "# ")
+	hint = strings.Trim(hint, "*")
+	hint = strings.Trim(hint, "`")
+
+	path := strings.TrimSpace(hint)
+	if path != "" && !strings.Contains(path, " ") {
+		return path
 	}
 	return ""
 }
