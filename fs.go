@@ -118,7 +118,23 @@ func TrashFile(path string, trashPath string, wd string) error {
 		return err
 	}
 
-	return os.Rename(absPath, destPath)
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return err
+	}
+
+	var b bytes.Buffer
+	w := zlib.NewWriter(&b)
+	if _, err := w.Write(content); err != nil {
+		return err
+	}
+	w.Close()
+
+	if err := os.WriteFile(destPath, b.Bytes(), 0644); err != nil {
+		return err
+	}
+
+	return os.Remove(absPath)
 }
 
 func RestoreFileFromTrash(originalPath string, trashPath string, wd string) error {
@@ -133,11 +149,31 @@ func RestoreFileFromTrash(originalPath string, trashPath string, wd string) erro
 	}
 
 	srcPath := filepath.Join(trashPath, relPath)
-	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
-		return fmt.Errorf("file not found in trash: %s", srcPath)
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
 	}
 
-	return os.Rename(srcPath, absPath)
+	if !isZlibCompressed(data) {
+		return os.Rename(srcPath, absPath)
+	}
+
+	r, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	content, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(absPath, content, 0644); err != nil {
+		return err
+	}
+
+	return os.Remove(srcPath)
 }
 
 func WriteBlob(dir string, hash string, content []byte) error {

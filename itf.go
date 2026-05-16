@@ -148,7 +148,7 @@ func (a *App) applyChanges(plan *ExecutionPlan) (Summary, error) {
 		case "delete":
 			p := action.Path
 			a.backupFileState(p, oldHashes)
-			if TrashFile(p, trash, ".") == nil {
+			if TrashFile(p, trash, a.stateManager.ProjectRoot) == nil {
 				deleted = append(deleted, p)
 			} else {
 				failedDeletes = append(failedDeletes, p)
@@ -249,7 +249,7 @@ func (a *App) undoLastOperation() (Summary, error) {
 	if len(ops) == 0 {
 		return Summary{Message: "No undo"}, nil
 	}
-	s := a.fileManager.Undo(ops, a.stateManager.StateDir)
+	s := a.fileManager.Undo(ops, a.stateManager.StateDir, a.stateManager.ProjectRoot)
 	s.Message = "Undone"
 	a.relativizeSummaryPaths(&s)
 	return s, nil
@@ -260,7 +260,7 @@ func (a *App) redoLastOperation() (Summary, error) {
 	if len(ops) == 0 {
 		return Summary{Message: "No redo"}, nil
 	}
-	s := a.fileManager.Redo(ops, a.stateManager.StateDir)
+	s := a.fileManager.Redo(ops, a.stateManager.StateDir, a.stateManager.ProjectRoot)
 	s.Message = "Redone"
 	a.relativizeSummaryPaths(&s)
 	return s, nil

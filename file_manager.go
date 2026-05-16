@@ -33,10 +33,10 @@ func (m *FileManager) WriteChanges(changes []FileChange, progressCb func(int)) (
 	return updated, failed
 }
 
-func (m *FileManager) Undo(ops []Operation, stateDir string) Summary {
+func (m *FileManager) Undo(ops []Operation, stateDir string, projectRoot string) Summary {
 	var s Summary
 	for _, op := range ops {
-		if !m.undoFile(op, stateDir) {
+		if !m.undoFile(op, stateDir, projectRoot) {
 			s.Failed = append(s.Failed, op.Path)
 			continue
 		}
@@ -55,13 +55,19 @@ func (m *FileManager) Undo(ops []Operation, stateDir string) Summary {
 	return s
 }
 
-func (m *FileManager) undoFile(op Operation, stateDir string) bool {
+func (m *FileManager) undoFile(op Operation, stateDir string, projectRoot string) bool {
 	currentPath := op.Path
 	if op.Action == "rename" {
 		currentPath = op.NewPath
 	}
 
-	actualHash, _ := GetFileSHA256(currentPath)
+	checkPath := currentPath
+	if op.Action == "delete" {
+		rel, _ := filepath.Rel(projectRoot, op.Path)
+		checkPath = filepath.Join(stateDir, TrashDir, rel)
+	}
+
+	actualHash, _ := GetFileSHA256(checkPath)
 	if actualHash != op.ContentHash {
 		return false
 	}
@@ -74,22 +80,22 @@ func (m *FileManager) undoFile(op Operation, stateDir string) bool {
 		return os.Remove(op.Path) == nil
 	}
 
+	if op.Action == "delete" {
+		return RestoreFileFromTrash(op.Path, filepath.Join(stateDir, TrashDir), projectRoot) == nil
+	}
+
 	content, err := ReadBlob(stateDir, op.OldContentHash)
 	if err != nil {
 		return false
 	}
 
-	if op.Action == "delete" {
-		_ = os.MkdirAll(filepath.Dir(op.Path), 0755)
-	}
-
 	return os.WriteFile(op.Path, content, 0644) == nil
 }
 
-func (m *FileManager) Redo(ops []Operation, stateDir string) Summary {
+func (m *FileManager) Redo(ops []Operation, stateDir string, projectRoot string) Summary {
 	var s Summary
 	for _, op := range ops {
-		if !m.redoFile(op, stateDir) {
+		if !m.redoFile(op, stateDir, projectRoot) {
 			s.Failed = append(s.Failed, op.Path)
 			continue
 		}
@@ -108,7 +114,7 @@ func (m *FileManager) Redo(ops []Operation, stateDir string) Summary {
 	return s
 }
 
-func (m *FileManager) redoFile(op Operation, stateDir string) bool {
+func (m *FileManager) redoFile(op Operation, stateDir string, projectRoot string) bool {
 	actualHash, _ := GetFileSHA256(op.Path)
 	if actualHash != op.OldContentHash {
 		return false
@@ -119,7 +125,7 @@ func (m *FileManager) redoFile(op Operation, stateDir string) bool {
 	}
 
 	if op.Action == "delete" {
-		return os.Remove(op.Path) == nil
+		return TrashFile(op.Path, filepath.Join(stateDir, TrashDir), projectRoot) == nil
 	}
 
 	content, err := ReadBlob(stateDir, op.ContentHash)
